@@ -8,21 +8,38 @@ server in step 1g imports these functions.
 
 Public functions (everything else in this file is a helper for these):
 
-    create_sandbox()                          -> Sandbox
+    create_sandbox(sandbox_id=None)           -> Sandbox
     destroy_sandbox(sandbox_id)
     exec(sandbox_id, cmd, cwd, background, timeout) -> dict
     read_file(sandbox_id, path)               -> str
     write_file(sandbox_id, path, content)
 
+    For the API server (1g):
+    new_sandbox_id()                          -> str
+    is_sandbox_running(sandbox_id)            -> bool
+    list_host_sandboxes()                     -> list[str]
+
+Errors the API server maps to HTTP codes:
+
+    ValueError     malformed sandbox ID                    -> 404
+    LookupError    no such sandbox on this host            -> 404
+    httpx.HTTPError  the guest agent didn't answer         -> 409 / 502
+
 Must run as root (it creates namespaces, cgroups and Firecracker processes).
 
-Layout on the host for sandbox number N (sandbox ID "sbx<N>"):
+Each sandbox has two identifiers (see README section 1):
 
-    /var/sbx/sbx<N>/rootfs.ext4         this sandbox's own copy of the disk
-    /var/sbx/sbx<N>/fc.sock             Firecracker's API socket
-    /var/sbx/sbx<N>/firecracker.pid     Firecracker's process ID
-    /var/sbx/sbx<N>/console.log         the VM's serial console output
-    /sys/fs/cgroup/sandboxes/sbx<N>/    cgroup holding the Firecracker process
+    id   "sbx_<32 hex>"  its name: random, permanent, never reused
+    n    1..250          its network slot: reused after the sandbox is destroyed
+
+Layout on the host for sandbox <id> holding slot N:
+
+    /var/sbx/<id>/rootfs.ext4           this sandbox's own copy of the disk
+    /var/sbx/<id>/fc.sock               Firecracker's API socket
+    /var/sbx/<id>/firecracker.pid       Firecracker's process ID
+    /var/sbx/<id>/console.log           the VM's serial console output
+    /sys/fs/cgroup/sandboxes/<id>/      cgroup holding the Firecracker process
+    /var/sbx/slots/<N> -> <id>          symlink: "slot N belongs to <id>"
     network namespace "sbx<N>"          reached from the host at 10.201.0.<N>
 
 All paths in this file are plain strings built with f-strings.
@@ -31,10 +48,12 @@ All paths in this file are plain strings built with f-strings.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import signal
 import subprocess
 import time
+import uuid
 from typing import Callable
 
 import httpx
@@ -98,8 +117,8 @@ class Sandbox(BaseModel):
     """
     What create_sandbox() returns: everything needed to find and use a sandbox.
 
-    id            "sbx3"
-    n             3, the sandbox number (decides its namespace and IP)
+    id            "sbx_3f9c...", permanent and never reused
+    n             3, the network slot (decides its namespace and IP)
     ip            "10.201.0.3", the address the host uses to reach the VM
     pid           Firecracker's process ID on the host
     boot_seconds  time from starting Firecracker to the guest agent answering
@@ -120,30 +139,42 @@ class Sandbox(BaseModel):
 # Keeping them in one place means the naming scheme is written down only once.
 # ---------------------------------------------------------------------------
 
-def sandbox_id_for(n: int) -> str:
-    """Turn a sandbox number into its ID, e.g. 3 -> "sbx3"."""
+SANDBOX_ID_PATTERN = re.compile(r"sbx_[0-9a-f]{32}")
+
+
+def new_sandbox_id() -> str:
+    """Make a new random sandbox ID, e.g. "sbx_3f9c1a7e..."; never reused."""
+    return f"sbx_{uuid.uuid4().hex}"
+
+
+def validate_sandbox_id(sandbox_id: str) -> None:
+    """Raise ValueError unless this is one of our IDs, so input like "../etc" never reaches a path we delete."""
+    if not SANDBOX_ID_PATTERN.fullmatch(sandbox_id):
+        raise ValueError(f"not a sandbox ID: {sandbox_id!r}")
+
+
+def namespace_for(n: int) -> str:
+    """Return the network namespace name for slot n, e.g. 3 -> "sbx3" (netns_create.sh uses the same name)."""
     return f"sbx{n}"
 
 
-def number_from_id(sandbox_id: str) -> int:
-    """Turn a sandbox ID into its number, e.g. "sbx3" -> 3; raise ValueError if invalid."""
-    prefix = "sbx"
-    digits = sandbox_id[len(prefix):]
-    if not sandbox_id.startswith(prefix) or not digits.isdigit():
-        raise ValueError(f"not a sandbox ID: {sandbox_id!r}")
-    n = int(digits)
-    if not MIN_SANDBOX_NUMBER <= n <= MAX_SANDBOX_NUMBER:
-        raise ValueError(f"sandbox number out of range: {sandbox_id!r}")
-    return n
-
-
 def guest_ip_for(n: int) -> str:
-    """Return the address the host uses to reach sandbox n, e.g. 10.201.0.3."""
+    """Return the address the host uses to reach the sandbox in slot n, e.g. 10.201.0.3."""
     return f"10.201.0.{n}"
 
 
+def slots_dir() -> str:
+    """Return the folder of slot symlinks (a function, not a constant, so tests can move SANDBOXES_ROOT)."""
+    return f"{SANDBOXES_ROOT}/slots"
+
+
+def slot_path(n: int) -> str:
+    """Return the symlink that records who holds slot n, e.g. /var/sbx/slots/3."""
+    return f"{slots_dir()}/{n}"
+
+
 def sandbox_dir(sandbox_id: str) -> str:
-    """Return the sandbox's folder, e.g. /var/sbx/sbx3."""
+    """Return the sandbox's folder, e.g. /var/sbx/sbx_3f9c..."""
     return f"{SANDBOXES_ROOT}/{sandbox_id}"
 
 
@@ -168,7 +199,7 @@ def console_log_path(sandbox_id: str) -> str:
 
 
 def cgroup_dir(sandbox_id: str) -> str:
-    """Return the sandbox's cgroup folder, e.g. /sys/fs/cgroup/sandboxes/sbx3."""
+    """Return the sandbox's cgroup folder, e.g. /sys/fs/cgroup/sandboxes/sbx_3f9c..."""
     return f"{CGROUP_ROOT}/{sandbox_id}"
 
 
@@ -205,19 +236,53 @@ def write_text_file(path: str, text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# create_sandbox, step 1: pick a number and make the folder
+# Network slots
+#
+# The symlink slots/<n> -> <id> is the only record on the host of which
+# sandbox holds which slot, so there is no second copy to drift out of sync.
 # ---------------------------------------------------------------------------
 
-def claim_free_number() -> int:
-    """Reserve the lowest unused sandbox number by creating its folder, and return it."""
-    os.makedirs(SANDBOXES_ROOT, exist_ok=True)
+def claim_free_slot(sandbox_id: str) -> int:
+    """Reserve the lowest free slot by creating slots/<n> -> sandbox_id, and return n."""
+    os.makedirs(slots_dir(), exist_ok=True)
     for n in range(MIN_SANDBOX_NUMBER, MAX_SANDBOX_NUMBER + 1):
         try:
-            os.mkdir(sandbox_dir(sandbox_id_for(n)))   # fails if taken; check + create in one step, so no two callers get the same n
+            os.symlink(sandbox_id, slot_path(n))   # fails if taken; check + create in one step, so no two callers get the same n
             return n
         except FileExistsError:
             continue
-    raise RuntimeError(f"all {MAX_SANDBOX_NUMBER} sandbox numbers are in use")
+    raise RuntimeError(f"all {MAX_SANDBOX_NUMBER} sandbox slots are in use")
+
+
+def find_slot(sandbox_id: str) -> int | None:
+    """Return the slot this sandbox holds, or None if it holds none."""
+    if not os.path.isdir(slots_dir()):
+        return None
+    for name in os.listdir(slots_dir()):
+        try:
+            if os.readlink(f"{slots_dir()}/{name}") == sandbox_id:
+                return int(name)
+        except (FileNotFoundError, OSError, ValueError):
+            continue                               # released mid-scan, or not one of our symlinks
+    return None
+
+
+def release_slot(n: int, sandbox_id: str) -> None:
+    """Free slot n, but only if this sandbox still holds it."""
+    try:
+        if os.readlink(slot_path(n)) == sandbox_id:
+            os.remove(slot_path(n))
+    except FileNotFoundError:
+        pass
+
+
+def require_slot(sandbox_id: str) -> int:
+    """Return the sandbox's slot; raise LookupError if the sandbox doesn't exist (1g turns this into a 404)."""
+    validate_sandbox_id(sandbox_id)
+    n = find_slot(sandbox_id)
+    if n is None:
+        raise LookupError(f"no such sandbox: {sandbox_id}")
+    return n
 
 
 # ---------------------------------------------------------------------------
@@ -254,12 +319,13 @@ def create_cgroup(sandbox_id: str) -> None:
 def start_firecracker(sandbox_id: str, n: int) -> int:
     """Start Firecracker in the background inside the sandbox's namespace and return its PID."""
     command = [
-        "ip", "netns", "exec", sandbox_id_for(n),
+        "ip", "netns", "exec", namespace_for(n),
         "firecracker", "--api-sock", socket_path(sandbox_id),
     ]
     with open(console_log_path(sandbox_id), "w") as console_log:
         process = subprocess.Popen(
             command, stdout=console_log, stderr=subprocess.STDOUT,
+            start_new_session=True,   # own session: Ctrl+C on the API server doesn't kill running VMs (1g restart test)
         )
     return process.pid
 
@@ -361,7 +427,7 @@ def configure_and_boot_vm(sandbox_id: str) -> None:
 
 def guest_agent_url(sandbox_id: str, path: str) -> str:
     """Return the full URL of a guest agent endpoint, e.g. http://10.201.0.3:49983/exec."""
-    ip = guest_ip_for(number_from_id(sandbox_id))
+    ip = guest_ip_for(require_slot(sandbox_id))
     return f"http://{ip}:{GUEST_AGENT_PORT}{path}"
 
 
@@ -388,13 +454,20 @@ def wait_for_guest_agent(sandbox_id: str) -> None:
 # create_sandbox: the whole sequence
 # ---------------------------------------------------------------------------
 
-def create_sandbox() -> Sandbox:
-    """Create and boot a new sandbox; if any step fails, clean up and re-raise the error."""
+def create_sandbox(sandbox_id: str | None = None) -> Sandbox:
+    """Create and boot a new sandbox; if any step fails, clean up and re-raise the error.
+
+    The API server (1g) passes in an ID from new_sandbox_id() so it can save the
+    row as 'starting' before booting. Called with no ID, a new one is made here.
+    """
+    if sandbox_id is None:
+        sandbox_id = new_sandbox_id()
+    validate_sandbox_id(sandbox_id)
     ensure_cgroup_parent()
-    n = claim_free_number()
-    sandbox_id = sandbox_id_for(n)
+    os.makedirs(sandbox_dir(sandbox_id))   # raises FileExistsError if this ID was already used
 
     try:
+        n = claim_free_slot(sandbox_id)    # inside try, so "all slots in use" still removes the folder
         copy_base_image(sandbox_id)
         create_network(n)
         create_cgroup(sandbox_id)
@@ -475,19 +548,14 @@ def remove_cgroup(sandbox_id: str) -> None:
         os.rmdir(cgroup_dir(sandbox_id))
 
 
-def network_exists(n: int) -> bool:
-    """Return True if the sandbox's network namespace exists."""
-    result = subprocess.run(
-        ["ip", "netns", "list"], capture_output=True, text=True, check=True,
-    )
-    names = [line.split()[0] for line in result.stdout.splitlines() if line.strip()]
-    return sandbox_id_for(n) in names
-
-
 def delete_network(n: int) -> None:
-    """Delete the sandbox's namespace, veth pair, NAT rules and host route, if they exist."""
-    if network_exists(n):
-        run_script("netns_delete.sh", str(n))
+    """Delete the sandbox's namespace, veth pair, host route and connection-tracking entries.
+
+    Always runs the script (it skips anything already gone), so a half-built
+    network, e.g. a host route left without its namespace, is cleaned up too
+    before the slot is handed to the next sandbox.
+    """
+    run_script("netns_delete.sh", str(n))
 
 
 def remove_sandbox_dir(sandbox_id: str) -> None:
@@ -502,13 +570,52 @@ def remove_sandbox_dir(sandbox_id: str) -> None:
 
 def destroy_sandbox(sandbox_id: str) -> None:
     """Stop the sandbox and remove everything it created; safe on a half-created sandbox."""
-    # Order matters: the process must be gone before its cgroup can be removed,
-    # and the folder goes last because it holds the PID file.
-    n = number_from_id(sandbox_id)
+    # Order matters: the process must be gone before its cgroup can be removed;
+    # the slot is freed only after its network is deleted, so the next sandbox
+    # in that slot can't collide with a leftover veth; and the folder goes last
+    # because it holds the PID file.
+    validate_sandbox_id(sandbox_id)
+    n = find_slot(sandbox_id)          # None if create failed before claiming a slot
     kill_firecracker(sandbox_id)
     remove_cgroup(sandbox_id)
-    delete_network(n)
+    if n is not None:
+        delete_network(n)
+        release_slot(n, sandbox_id)
     remove_sandbox_dir(sandbox_id)
+
+
+# ---------------------------------------------------------------------------
+# For the API server (1g): checking what is on the host
+#
+# On startup the API server compares its database with the host:
+#   - a DB row whose sandbox is no longer running -> destroy_sandbox, mark destroyed
+#   - a sandbox on the host with no live DB row    -> destroy_sandbox (orphan)
+# Every namespace holds a slot while it exists (the slot is freed only after
+# the network is deleted), so checking slots and folders also finds leftover
+# namespaces.
+# ---------------------------------------------------------------------------
+
+def is_sandbox_running(sandbox_id: str) -> bool:
+    """Return True if the sandbox's Firecracker process is still alive."""
+    validate_sandbox_id(sandbox_id)
+    pid = load_pid(sandbox_id)
+    return pid is not None and pid_still_belongs_to_sandbox(pid, sandbox_id)
+
+
+def list_host_sandboxes() -> list[str]:
+    """Return the IDs of every sandbox that has a folder or holds a slot on this host."""
+    ids = set()
+    if os.path.isdir(SANDBOXES_ROOT):
+        ids.update(name for name in os.listdir(SANDBOXES_ROOT) if SANDBOX_ID_PATTERN.fullmatch(name))
+    if os.path.isdir(slots_dir()):
+        for name in os.listdir(slots_dir()):
+            try:
+                target = os.readlink(f"{slots_dir()}/{name}")
+            except OSError:
+                continue
+            if SANDBOX_ID_PATTERN.fullmatch(target):
+                ids.add(target)
+    return sorted(ids)
 
 
 # ---------------------------------------------------------------------------
