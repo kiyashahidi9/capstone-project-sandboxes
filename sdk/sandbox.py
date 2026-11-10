@@ -17,6 +17,9 @@ Smoke test against a running API:  python -m sdk.sandbox
 """
 import os
 import httpx
+from dotenv import load_dotenv
+
+load_dotenv()   # read .env from the repo root (shell variables still win)
 
 DEFAULT_API = os.environ.get("SANDBOX_API", "http://localhost:8000")
 

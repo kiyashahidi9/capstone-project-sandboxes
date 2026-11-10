@@ -5,7 +5,7 @@ exec/files to ONE guest agent running in Docker, so all sandboxes share one file
 here. That's fine for SDK and agent work; isolation is tested in 1f, not here.
 
 Run from the repo root (Git Bash on Windows):
-  pip install fastapi uvicorn httpx
+  pip install fastapi uvicorn httpx python-dotenv
   MSYS_NO_PATHCONV=1 docker run --rm -p 49983:49983 -v "$(pwd -W)/guest_agent:/app" -w /app python:3.12 python guest_agent.py
   uvicorn mock.mock_api:app --port 8000
 
@@ -18,50 +18,16 @@ import os
 import time
 
 import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
+
+load_dotenv()   # read .env from the repo root (shell variables still win)
 
 GUEST = os.environ.get("GUEST_AGENT", "http://127.0.0.1:49983")   # the guest agent in Docker
 MAX_SANDBOXES = 250
 
 app = FastAPI(title="mock sandbox API")
 sandboxes: dict[str, dict] = {}    # id -> sandbox record
-
-
-# ---------------------------------------------------------------- helpers
-
-def public(sb: dict) -> dict:
-    """The sandbox object every endpoint returns (see the contract)."""
-    return {k: sb[k] for k in ("id", "state", "ip", "created_at", "updated_at")}
-
-
-def get_sandbox(id: str) -> dict:
-    sb = sandboxes.get(id)
-    if sb is None:
-        raise HTTPException(404, f"no sandbox {id}")
-    return sb
-
-
-def get_running(id: str) -> dict:
-    sb = get_sandbox(id)
-    if sb["state"] != "running":
-        raise HTTPException(409, f"{id} is {sb['state']}")
-    return sb
-
-
-async def guest(method: str, path: str, timeout: float = 30, **kwargs) -> httpx.Response:
-    """Forward to the guest agent, mapping its errors the way the real API does."""
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.request(method, GUEST + path, **kwargs)
-    except httpx.ConnectError:
-        raise HTTPException(502, f"guest agent not reachable at {GUEST} (start it with docker, see top of file)")
-    if r.status_code >= 400 and r.status_code != 404:
-        try:
-            detail = r.json().get("error", r.text)
-        except ValueError:
-            detail = r.text
-        raise HTTPException(400 if r.status_code < 500 else 502, detail)
-    return r
 
 
 # ---------------------------------------------------------------- endpoints
@@ -120,3 +86,40 @@ def destroy(id: str):
         raise HTTPException(409, f"{id} is already destroyed")
     sb["state"], sb["updated_at"] = "destroyed", int(time.time())
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- helpers
+
+def public(sb: dict) -> dict:
+    """The sandbox object every endpoint returns (see the contract)."""
+    return {k: sb[k] for k in ("id", "state", "ip", "created_at", "updated_at")}
+
+
+def get_sandbox(id: str) -> dict:
+    sb = sandboxes.get(id)
+    if sb is None:
+        raise HTTPException(404, f"no sandbox {id}")
+    return sb
+
+
+def get_running(id: str) -> dict:
+    sb = get_sandbox(id)
+    if sb["state"] != "running":
+        raise HTTPException(409, f"{id} is {sb['state']}")
+    return sb
+
+
+async def guest(method: str, path: str, timeout: float = 30, **kwargs) -> httpx.Response:
+    """Forward to the guest agent, mapping its errors the way the real API does."""
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.request(method, GUEST + path, **kwargs)
+    except httpx.ConnectError:
+        raise HTTPException(502, f"guest agent not reachable at {GUEST} (start it with docker, see top of file)")
+    if r.status_code >= 400 and r.status_code != 404:
+        try:
+            detail = r.json().get("error", r.text)
+        except ValueError:
+            detail = r.text
+        raise HTTPException(400 if r.status_code < 500 else 502, detail)
+    return r

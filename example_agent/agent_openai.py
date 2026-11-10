@@ -2,14 +2,17 @@
 
     python example_agent/agent_openai.py "create hello.py that prints hello, and run it"
 
-Needs: pip install openai httpx, $OPENAI_API_KEY set,
+Needs: pip install openai httpx python-dotenv, OPENAI_API_KEY in .env,
 and the API (or mock) running. Optional: SANDBOX_API (default http://localhost:8000).
 """
 import json
 import os
 import sys
 
+from dotenv import load_dotenv
 from openai import OpenAI
+
+load_dotenv()   # read .env from the repo root (shell variables still win)
 
 # Let `python example_agent/agent_openai.py` find the sdk package in the repo root.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

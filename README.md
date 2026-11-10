@@ -13,7 +13,10 @@ Run everything from the repo root.
 
 ```bash
 # install dependencies
-pip install fastapi uvicorn httpx openai
+pip install fastapi uvicorn httpx openai python-dotenv
+
+# set up env vars, then fill in OPENAI_API_KEY in .env
+cp .env.example .env
 
 # terminal 1: start the guest agent (runs commands / files inside the "VM")
 # on Windows Git Bash: prefix with MSYS_NO_PATHCONV=1 and use "$(pwd -W)" instead of "$PWD"
@@ -28,7 +31,6 @@ curl http://localhost:49983/health
 # smoke-test the SDK end to end (create, exec, write/read a file, destroy)
 python -m sdk.sandbox
 
-# run the agent (keep the key out of the repo)
-export OPENAI_API_KEY="sk-..."
+# run the agent
 python example_agent/agent_openai.py "create hello.py that prints hello, and run it"
 ```
