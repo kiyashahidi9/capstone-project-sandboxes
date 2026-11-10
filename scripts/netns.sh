@@ -16,7 +16,7 @@
 # Packet flow:
 #   host -> 10.201.0.N -> vethNh => vethNn [DNAT -> 172.16.0.2] -> tap0 -> guest
 #   guest -> tap0 [SNAT 172.16.0.2 -> 10.201.0.N] -> vethNn => vethNh -> MASQUERADE -> internet
-#   (start sets the guest's "default via 172.16.0.1" over ssh from inside the ns)
+#      (the guest-agent service in the image sets "default via 172.16.0.1" at boot)
 #
 # Create steps (one function each below):
 #   1. namespace sbxN, loopback up
@@ -80,7 +80,6 @@ vars() {
 }
 
 in_ns()     { ip netns exec "$NS" "$@"; }
-ns_ssh()    { in_ns ssh "${SSH_OPTS[@]}" "root@$GUEST_IP" "$@"; }   # works before the guest has a default route
 guest_ssh() { ssh "${SSH_OPTS[@]}" "root@$CLONE_IP" "$@"; }         # the way the host normally reaches the VM
 
 host_iface() {
@@ -190,12 +189,10 @@ cmd_start() {
   fc_put /network-interfaces/eth0 "{\"iface_id\":\"eth0\",\"guest_mac\":\"$GUEST_MAC\",\"host_dev_name\":\"$TAP\"}"
   fc_put /actions '{"action_type":"InstanceStart"}'
 
-  log "waiting for ssh"
-  for i in $(seq 1 60); do ns_ssh true 2>/dev/null && break; sleep 1; done
-  ns_ssh true || die "ssh never answered, see $console"
-
-  log "setting guest default route via $TAP_IP"
-  ns_ssh "ip route replace default via $TAP_IP dev eth0"
+    log "waiting for the guest agent on $CLONE_IP:49983"
+    for i in $(seq 1 60); do curl -sf --max-time 1 "http://$CLONE_IP:49983/health" >/dev/null && break; sleep 1; done
+    curl -sf --max-time 2 "http://$CLONE_IP:49983/health" >/dev/null \
+      || die "guest agent never answered (disk older than install_guest_agent.sh? remove $disk). See $console"
 
   log "VM $N is up:  ssh -i $FC_DIR/vm_key root@$CLONE_IP"
 }
@@ -275,6 +272,7 @@ cmd_verify() {
 
   echo " live (VM running)"
   if [[ -n $(ip netns pids "$NS" 2>/dev/null) ]]; then
+    check "guest agent /health"              out_has '"ok": true' curl -s --max-time 2 "http://$CLONE_IP:49983/health"
     check "host can ping $CLONE_IP"          ping -c1 -W2 "$CLONE_IP"
     check "host can ssh to $CLONE_IP"        guest_ssh true
     check "guest has default via $TAP_IP"    out_has "via $TAP_IP " guest_ssh ip route show default
