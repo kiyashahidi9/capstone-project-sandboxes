@@ -30,13 +30,20 @@ curl http://localhost:49983/health
 
 # smoke-test the SDK end to end (create, exec, write/read a file, destroy)
 python -m sdk.sandbox
-# expected (sandbox number and pid will vary):
-#   created Sandbox(id='sbx1', api='http://localhost:8000')
-#   exec       {'exit_code': 0, 'stdout': 'hi\n', 'stderr': '', 'timed_out': False}
-#   read_file  'hello'
-#   background {'pid': 1234}
-#   destroyed sbx1
+```
 
-# run the agent
+Expected smoke test output (sandbox number and pid will vary):
+
+```
+created Sandbox(id='sbx1', api='http://localhost:8000')
+exec       {'exit_code': 0, 'stdout': 'hi\n', 'stderr': '', 'timed_out': False}
+read_file  'hello'
+background {'pid': 1234}
+destroyed sbx1
+```
+
+Then run the agent:
+
+```bash
 python example_agent/agent_openai.py "create hello.py that prints hello, and run it"
 ```
