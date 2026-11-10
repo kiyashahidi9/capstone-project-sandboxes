@@ -86,7 +86,12 @@ class Sandbox:
 
         return cls(sandbox_id, api)
 
-    def exec(self, cmd: str, cwd: str = "/root", background: bool = False) -> dict:
+    def exec(
+            self, 
+            cmd: str, 
+            cwd: str = "/root", 
+            background: bool = False
+            ) -> dict:
         """
         Runs a shell command in the sandbox
         foreground -> {"exit_code", "stdout", "stderr", ...}; check exit_code, it won't raise
