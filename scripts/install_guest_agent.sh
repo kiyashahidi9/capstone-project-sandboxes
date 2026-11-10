@@ -21,11 +21,24 @@
 # don't have the new agent: remove them, and `netns.sh start N` makes fresh ones.
 #
 # 1e test:
-#   chmod +x scripts/install_guest_agent.sh                            # once
-#   sudo scripts/install_guest_agent.sh && sudo scripts/install_guest_agent.sh verify
-#   sudo scripts/netns.sh delete 1; sudo rm -f ~/fc/vm1.ext4          # drop the stale copy
-#   sudo scripts/netns.sh start 1
-#   scripts/install_guest_agent.sh test 1
+# 0. Clean up anything left over from 1d
+  # sudo scripts/netns.sh delete 1; sudo scripts/netns.sh delete 2
+  # sudo rm -f ~/fc/vm1.ext4 ~/fc/vm2.ext4
+  # mount | grep -E "rootfs|/mnt/rootfs"          # should print nothing
+# if it prints something: sudo umount /mnt/rootfs
+
+# 1. Bake the guest agent into the base image, then check it
+  # chmod +x scripts/install_guest_agent.sh
+  # sudo scripts/install_guest_agent.sh
+  # sudo scripts/install_guest_agent.sh verify
+
+# 2. Boot a fresh VM from the updated image
+  # sudo scripts/netns.sh start 1
+
+# 3. Test the agent from the host
+  # scripts/install_guest_agent.sh test 1
+
+
 set -Eeuo pipefail
 
 readonly PORT=49983
