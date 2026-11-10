@@ -21,15 +21,13 @@ open questions
 - 
 """
 
-## IMPORT ##
+## IMPORTS ##
 
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
-
 from helpers import run_background, run_foreground, write_file_atomically
-
 
 ## CONFIG ##
 
@@ -47,13 +45,12 @@ os.environ.setdefault("HOME", "/root")
 class BadRequest(Exception):
     """Client error: becomes a 400 with {"error": ...}."""
 
-
 ## REQUEST HANDLER ##
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "guest-agent/1"
 
-    # ------------------------------------------------------------ endpoints
+    # endpoints
 
     def health(self) -> None:
         """
@@ -182,7 +179,14 @@ ROUTES = {
 ## RUN ##
 
 if __name__ == "__main__":
+
+    # listen on HOST:PORT; each request gets its own Handler on its own thread
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    server.daemon_threads = True  # a long /exec never blocks /health or shutdown
+
+    # a long /exec never blocks stopping the agent
+    server.daemon_threads = True
+
+    # flush=True: show up in the systemd logs right away
     print(f"guest agent listening on {HOST}:{PORT}", flush=True)
+
     server.serve_forever()
