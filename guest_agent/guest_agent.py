@@ -15,63 +15,129 @@ Endpoints:
   PUT  /files?path=/abs/path  body   -> {"ok": true}  (creates parent folders)
 
 No auth: only the host can reach the VM (10.201.0.N is routed on the host only).
+
+open questions
+- should we use FastAPI for this agent? we would have to install it into every VM
+- 
 """
+
+## IMPORT ##
+
 import json
 import os
-import signal
-import subprocess
-import tempfile
-import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from helpers import run_background, run_foreground, write_file_atomically
+
+
+## CONFIG ##
+
+# where the agent runs and defaults
 HOST = os.environ.get("AGENT_HOST", "0.0.0.0")
 PORT = int(os.environ.get("AGENT_PORT", "49983"))
-DEFAULT_CWD = "/root"
-DEFAULT_TIMEOUT = 600  # seconds
 
-# systemd starts services without HOME; tools like npm and git need it.
+# fallbacks for /exec requests
+DEFAULT_CWD = "/root"     # when no "cwd" is given
+DEFAULT_TIMEOUT = 600     # seconds; when a foreground run has no "timeout"
+
+# sets HOME if it isn't already set; tools like npm and git need it.
 os.environ.setdefault("HOME", "/root")
-
 
 class BadRequest(Exception):
     """Client error: becomes a 400 with {"error": ...}."""
 
 
-def run_foreground(cmd, cwd, timeout):
-    # Own process group, so a timeout kills the shell AND everything it started.
-    # (subprocess.run(..., timeout=) only kills the shell; children like npm keep
-    # the output pipes open and the request hangs.)
-    proc = subprocess.Popen(
-        cmd, shell=True, cwd=cwd, text=True, stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
-    )
-    try:
-        out, err = proc.communicate(timeout=timeout)
-        return {"exit_code": proc.returncode, "stdout": out, "stderr": err, "timed_out": False}
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        out, err = proc.communicate()
-        return {"exit_code": 124, "stdout": out, "stderr": err, "timed_out": True}
-
-
-def run_background(cmd, cwd):
-    # The pid isn't known until the process starts, so write to a temp file and
-    # rename it to /tmp/bg-<pid>.log afterwards (the open file follows the rename).
-    fd, tmp = tempfile.mkstemp(prefix="bg-", suffix=".log", dir="/tmp")
-    with os.fdopen(fd, "w") as log:
-        proc = subprocess.Popen(
-            cmd, shell=True, cwd=cwd, stdin=subprocess.DEVNULL,
-            stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
-        )
-    os.rename(tmp, f"/tmp/bg-{proc.pid}.log")
-    # Reap it when it exits, so finished background jobs don't pile up as zombies.
-    threading.Thread(target=proc.wait, daemon=True).start()
-    return {"pid": proc.pid}
-
+## REQUEST HANDLER ##
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "guest-agent/1"
+
+    # ------------------------------------------------------------ endpoints
+
+    def health(self) -> None:
+        """
+        GET /health
+        answers {"ok": true} if the agent is up
+        """
+        self.send(200, {"ok": True})
+
+    def exec_(self) -> None:
+        """
+        POST /exec {"cmd", "cwd"?, "timeout"?, "background"?}
+        runs a shell command in the VM
+        background: true -> returns the pid right away
+        otherwise -> waits and returns its output
+        """
+        request = self.json_body()
+
+        # the command to run (required)
+        cmd = request.get("cmd")
+        if not isinstance(cmd, str) or not cmd:
+            raise BadRequest('"cmd" must be a non-empty string')
+
+        # the folder to run it in (optional)
+        cwd = request.get("cwd", DEFAULT_CWD)
+        if not os.path.isdir(cwd):
+            raise BadRequest(f"cwd does not exist: {cwd}")
+
+        # background: start it and return the pid
+        if request.get("background"):
+            return self.send(200, run_background(cmd, cwd))
+
+        # foreground: wait for it and return its output
+        timeout = request.get("timeout", DEFAULT_TIMEOUT)
+        self.send(200, run_foreground(cmd, cwd, timeout))
+
+    def read_file(self) -> None:
+        """
+        GET /files?path=/abs/path
+        returns the file's raw contents
+        missing file -> 404
+        """
+        path = self.path_param()
+
+        # no such file
+        if not os.path.isfile(path):
+            return self.send(404, {"error": f"no such file: {path}"})
+
+        # send the bytes as-is
+        with open(path, "rb") as f:
+            self.send(200, f.read(), "application/octet-stream")
+
+    def write_file(self) -> None:
+        """
+        PUT /files?path=/abs/path  (body = file contents)
+        writes the file, creating parent folders
+        """
+        path = self.path_param()
+
+        # write the request body to the file
+        write_file_atomically(path, self.body())
+
+        self.send(200, {"ok": True})
+
+    # ------------------------------------------------------------ routing
+
+    def route(self, method):
+        handler = ROUTES.get((method, urlparse(self.path).path))
+        if handler is None:
+            return self.send(404, {"error": "not found"})
+        try:
+            handler(self)
+        except BadRequest as e:
+            self.send(400, {"error": str(e)})
+        except Exception as e:  # keep the agent alive whatever happens
+            self.send(500, {"error": f"{type(e).__name__}: {e}"})
+
+    def do_GET(self):
+        self.route("GET")
+
+    def do_POST(self):
+        self.route("POST")
+
+    def do_PUT(self):
+        self.route("PUT")
 
     # ------------------------------------------------------------ helpers
 
@@ -103,62 +169,8 @@ class Handler(BaseHTTPRequestHandler):
             raise BadRequest("?path= must be an absolute path")
         return path
 
-    def route(self, method):
-        handler = ROUTES.get((method, urlparse(self.path).path))
-        if handler is None:
-            return self.send(404, {"error": "not found"})
-        try:
-            handler(self)
-        except BadRequest as e:
-            self.send(400, {"error": str(e)})
-        except Exception as e:  # keep the agent alive whatever happens
-            self.send(500, {"error": f"{type(e).__name__}: {e}"})
 
-    def do_GET(self):
-        self.route("GET")
-
-    def do_POST(self):
-        self.route("POST")
-
-    def do_PUT(self):
-        self.route("PUT")
-
-    # ------------------------------------------------------------ endpoints
-
-    def health(self):
-        self.send(200, {"ok": True})
-
-    def exec_(self):
-        req = self.json_body()
-        cmd = req.get("cmd")
-        if not isinstance(cmd, str) or not cmd:
-            raise BadRequest('"cmd" must be a non-empty string')
-        cwd = req.get("cwd", DEFAULT_CWD)
-        if not os.path.isdir(cwd):
-            raise BadRequest(f"cwd does not exist: {cwd}")
-        if req.get("background"):
-            return self.send(200, run_background(cmd, cwd))
-        timeout = req.get("timeout", DEFAULT_TIMEOUT)
-        self.send(200, run_foreground(cmd, cwd, timeout))
-
-    def read_file(self):
-        path = self.path_param()
-        if not os.path.isfile(path):
-            return self.send(404, {"error": f"no such file: {path}"})
-        with open(path, "rb") as f:
-            self.send(200, f.read(), "application/octet-stream")
-
-    def write_file(self):
-        path = self.path_param()
-        data = self.body()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        # Write to a temp file, then rename: readers never see a half-written file.
-        tmp = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
-        with open(tmp, "wb") as f:
-            f.write(data)
-        os.replace(tmp, path)
-        self.send(200, {"ok": True})
-
+## ROUTES ##
 
 ROUTES = {
     ("GET", "/health"): Handler.health,
@@ -167,6 +179,7 @@ ROUTES = {
     ("PUT", "/files"): Handler.write_file,
 }
 
+## RUN ##
 
 if __name__ == "__main__":
     server = ThreadingHTTPServer((HOST, PORT), Handler)

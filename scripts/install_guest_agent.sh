@@ -5,14 +5,14 @@
 # on port 49983. The host uses it to run commands and read/write files in the VM.
 #
 # install does:
-#   1. Checks guest_agent.py parses (on the host) and that the image has python3.
-#   2. Mounts ~/fc/rootfs.ext4 and copies the agent to /opt/guest_agent/.
+#   1. Checks the agent's .py files parse (on the host) and that the image has python3.
+#   2. Mounts ~/fc/rootfs.ext4 and copies the agent's files to /opt/guest_agent/.
 #   3. Writes guest-agent.service: at boot it sets the VM's network
 #      (172.16.0.2/30, eth0 up, default via 172.16.0.1), then runs the agent.
 #   4. Enables the service at boot and unmounts (always, even on error).
 #
 # Usage:
-#   sudo install_guest_agent.sh           install (rerun whenever guest_agent.py changes)
+#   sudo install_guest_agent.sh           install (rerun whenever guest_agent/ changes)
 #   sudo install_guest_agent.sh verify    checklist: is the image up to date?
 #   install_guest_agent.sh test N         checklist: does the agent work in running VM N?
 #                                         (AGENT_URL=http://host:port overrides the address)
@@ -43,13 +43,15 @@ set -Eeuo pipefail
 
 readonly PORT=49983
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-readonly AGENT_SRC=$REPO/guest_agent/guest_agent.py
+readonly AGENT_SRC_DIR=$REPO/guest_agent
+readonly AGENT_FILES=(guest_agent.py helpers.py agent_types.py)   # everything the agent needs at runtime
 REAL_HOME=$(getent passwd "${SUDO_USER:-$(id -un)}" | cut -d: -f6)   # under sudo, $HOME is /root
 FC_DIR=${FC_DIR:-$REAL_HOME/fc}
 readonly ROOTFS=$FC_DIR/rootfs.ext4
 
 # Paths inside the image
-readonly AGENT_DST=/opt/guest_agent/guest_agent.py
+readonly AGENT_DST_DIR=/opt/guest_agent
+readonly AGENT_DST=$AGENT_DST_DIR/guest_agent.py   # the entry point the service runs
 readonly UNIT=/etc/systemd/system/guest-agent.service
 readonly UNIT_LINK=/etc/systemd/system/multi-user.target.wants/guest-agent.service
 
@@ -96,16 +98,22 @@ image_has_python() { [[ -L $MNT/usr/bin/python3 || -x $MNT/usr/bin/python3 ]]; }
 
 cmd_install() {
   need_root
-  [[ -f $AGENT_SRC ]] || die "missing $AGENT_SRC"
-  log "1. checking $AGENT_SRC parses"
-  python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' "$AGENT_SRC"
+  local f
+  log "1. checking ${AGENT_FILES[*]} parse"
+  for f in "${AGENT_FILES[@]}"; do
+    [[ -f $AGENT_SRC_DIR/$f ]] || die "missing $AGENT_SRC_DIR/$f"
+    python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' "$AGENT_SRC_DIR/$f"
+  done
 
   log "   mounting $ROOTFS"
   mount_rootfs rw
   image_has_python || die "image has no /usr/bin/python3"
 
-  log "2. copying agent -> $AGENT_DST"
-  install -D -m 0755 "$AGENT_SRC" "$MNT$AGENT_DST"
+  log "2. copying agent -> $AGENT_DST_DIR/"
+  for f in "${AGENT_FILES[@]}"; do
+    install -D -m 0644 "$AGENT_SRC_DIR/$f" "$MNT$AGENT_DST_DIR/$f"
+  done
+  chmod 0755 "$MNT$AGENT_DST"   # only the entry point is executable
 
   log "3. writing $UNIT"
   printf '%s\n' "$SERVICE" > "$MNT$UNIT"
@@ -145,8 +153,10 @@ cmd_verify() {
   mount_rootfs ro
   echo "image $ROOTFS"
   check "image has python3"                    image_has_python
-  check "agent installed at $AGENT_DST"        test -f "$MNT$AGENT_DST"
-  check "agent matches the repo copy"          cmp -s "$AGENT_SRC" "$MNT$AGENT_DST"
+  local f
+  for f in "${AGENT_FILES[@]}"; do
+    check "$f matches the repo copy"           cmp -s "$AGENT_SRC_DIR/$f" "$MNT$AGENT_DST_DIR/$f"
+  done
   check "service file is up to date"           service_matches
   check "service enabled at boot"              test -L "$MNT$UNIT_LINK"
   local copy
