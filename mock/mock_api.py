@@ -1,26 +1,37 @@
 """Mock of the 1g API, for building the 1h SDK and agent without Firecracker.
 
 Same endpoints, JSON and status codes as the API contract. Every "sandbox" forwards
-exec/files to ONE local guest agent, so all sandboxes share one filesystem here.
-That's fine for SDK and agent work; isolation is tested in 1f, not here.
+exec/files to ONE guest agent running in Docker, so all sandboxes share one filesystem
+here. That's fine for SDK and agent work; isolation is tested in 1f, not here.
 
-Run:
+Run from the repo root (Git Bash on Windows):
   pip install fastapi uvicorn httpx
-  docker run --rm -p 49983:49983 -v "$PWD/guest_agent:/app" python:3.12 python /app/guest_agent.py
-  uvicorn dev.mock_api:app --port 8000
+  MSYS_NO_PATHCONV=1 docker run --rm -p 49983:49983 -v "$(pwd -W)/guest_agent:/app" -w /app python:3.12 python guest_agent.py
+  uvicorn mock.mock_api:app --port 8000
 
-Swap to the real API later by pointing the SDK at it (SANDBOX_API=http://<host>:8000).
+On Linux/macOS, drop MSYS_NO_PATHCONV=1 and use "$PWD" instead of "$(pwd -W)".
+The guest agent must run in Docker: it needs Linux (process groups, /tmp, /root).
+
+Switch to the real API later by pointing the SDK at it: SANDBOX_API=http://<host>:8000
 """
+import os
 import time
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 
-GUEST = "http://127.0.0.1:49983"   # the local guest agent (Docker)
+GUEST = os.environ.get("GUEST_AGENT", "http://127.0.0.1:49983")   # the guest agent in Docker
 MAX_SANDBOXES = 250
 
 app = FastAPI(title="mock sandbox API")
-sandboxes: dict[str, dict] = {}    # id -> sandbox object, as in the contract
+sandboxes: dict[str, dict] = {}    # id -> sandbox record
+
+
+# ---------------------------------------------------------------- helpers
+
+def public(sb: dict) -> dict:
+    """The sandbox object every endpoint returns (see the contract)."""
+    return {k: sb[k] for k in ("id", "state", "ip", "created_at", "updated_at")}
 
 
 def get_sandbox(id: str) -> dict:
@@ -38,17 +49,22 @@ def get_running(id: str) -> dict:
 
 
 async def guest(method: str, path: str, timeout: float = 30, **kwargs) -> httpx.Response:
-    """Forward to the guest agent, mapping its errors like the real API does."""
+    """Forward to the guest agent, mapping its errors the way the real API does."""
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.request(method, GUEST + path, **kwargs)
     except httpx.ConnectError:
-        raise HTTPException(502, "guest agent not running on :49983 (start it with docker, see top of file)")
+        raise HTTPException(502, f"guest agent not reachable at {GUEST} (start it with docker, see top of file)")
     if r.status_code >= 400 and r.status_code != 404:
-        detail = r.json().get("error", r.text) if r.headers.get("content-type") == "application/json" else r.text
+        try:
+            detail = r.json().get("error", r.text)
+        except ValueError:
+            detail = r.text
         raise HTTPException(400 if r.status_code < 500 else 502, detail)
     return r
 
+
+# ---------------------------------------------------------------- endpoints
 
 @app.post("/sandboxes", status_code=201)
 def create_sandbox():
@@ -59,7 +75,7 @@ def create_sandbox():
     n, now = free[0], int(time.time())
     sb = {"id": f"sbx{n}", "n": n, "state": "running", "ip": f"10.201.0.{n}",
           "created_at": now, "updated_at": now}
-    sandboxes[sb["id"]] = sb   # replaces a destroyed row with the same id
+    sandboxes[sb["id"]] = sb   # replaces a destroyed record with the same id
     return public(sb)
 
 
@@ -104,7 +120,3 @@ def destroy(id: str):
         raise HTTPException(409, f"{id} is already destroyed")
     sb["state"], sb["updated_at"] = "destroyed", int(time.time())
     return {"ok": True}
-
-
-def public(sb: dict) -> dict:
-    return {k: sb[k] for k in ("id", "state", "ip", "created_at", "updated_at")}
