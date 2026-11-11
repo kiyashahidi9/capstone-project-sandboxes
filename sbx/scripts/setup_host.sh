@@ -146,6 +146,7 @@ else
   rm -f "$ROOT/etc/resolv.conf"
   echo "nameserver 8.8.8.8" > "$ROOT/etc/resolv.conf"    # DNS for the VM, and for apt below
   mkdir -p "$ROOT/tmp" && chmod 1777 "$ROOT/tmp"         # apt needs a writable /tmp
+  mkdir -p "$ROOT/var/cache/apt/archives/partial" "$ROOT/var/lib/apt/lists/partial"   # apt's download folders
   printf '#!/bin/sh\nexit 101\n' > "$ROOT/usr/sbin/policy-rc.d"   # don't start services in the chroot
   chmod +x "$ROOT/usr/sbin/policy-rc.d"
   mkdir -p "$ROOT/proc" "$ROOT/sys" "$ROOT/dev"
