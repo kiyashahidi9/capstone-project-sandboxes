@@ -111,6 +111,8 @@ else
   echo "    installing python3, git, curl, nodejs, npm"
   rm -f "$TMP/root/etc/resolv.conf"
   echo "nameserver 8.8.8.8" > "$TMP/root/etc/resolv.conf"     # DNS for the VM, and for apt below
+  mkdir -p "$TMP/root/tmp"
+  chmod 1777 "$TMP/root/tmp"                                   # apt needs a writable /tmp inside the image
   mount -t proc /proc "$TMP/root/proc"
   chroot "$TMP/root" /bin/bash -c \
     "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 git curl nodejs npm"
