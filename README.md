@@ -7,7 +7,7 @@ Locally, a mock API and a Docker container stand in for the real Firecracker VMs
 example_agent → sdk → mock API (:8000) → guest agent in Docker (:49983)
 ```
 
-## Setup and test
+## Setup
 
 Run everything from the repo root.
 
@@ -28,18 +28,8 @@ uvicorn mock.mock_api:app --port 8000
 # terminal 3: check the guest agent is up -> {"ok": true}
 curl http://localhost:49983/health
 
-# smoke-test the SDK end to end (create, exec, write/read a file, destroy)
-python -m sdk.sandbox
-```
-
-Expected smoke test output (sandbox number and pid will vary):
-
-```
-created Sandbox(id='sbx1', api='http://localhost:8000')
-exec       {'exit_code': 0, 'stdout': 'hi\n', 'stderr': '', 'timed_out': False}
-read_file  'hello'
-background {'pid': 1234}
-destroyed sbx1
+# check the SDK end to end, no OpenAI key needed (prints each call and its output)
+python -m sdk.smoke_test
 ```
 
 Then run the agent:
