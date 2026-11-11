@@ -45,5 +45,29 @@ destroyed sbx1
 Then run the agent:
 
 ```bash
-python example_agent/agent_openai.py "create hello.py that prints hello, and run it"
+python -m example_agent.agent_openai "create hello.py that prints hello, and run it"
+```
+
+Or start the client agent, an interactive chat that keeps one sandbox open across tasks:
+
+```bash
+# must be run as a module from the repo root
+python -m client.client
+```
+
+Type a task at the `>` prompt. The agent works on it in the sandbox and prints its answer. Type `/quit` to exit; the sandbox is destroyed automatically. An example session (the agent's exact steps and wording will vary):
+
+```
+sandbox sbx1 ready
+> create hello.py that prints hello, and run it
+[write] hello.py
+[run] python hello.py
+      hello
+I created hello.py and ran it; it printed "hello".
+done
+> /quit
+```
+```
+sandbox sb1 ready
+> clone https://github.com/kiyashahidi9/example-express-app and start the dev server
 ```
