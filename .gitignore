@@ -1,0 +1,6 @@
+# Ignore everything at the top level...
+/*
+
+# ...except the sbx folder and this file
+!/sbx/
+!/.gitignore
