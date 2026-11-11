@@ -40,21 +40,12 @@ SYSTEM_PROMPT = (
 def run_tool(sandbox: Sandbox, name: str, args: dict) -> str:
     """
     Runs one tool call from the model in the sandbox
-    prints what it's doing
     returns the result as text for the model
     errors go back as text too, so the model can recover
     """
     try:
         if name == "run_command":
-            background = args.get("background", False)
-            print(f"[run] {args['cmd']}" + ("   (background)" if background else ""))
-
-            result = sandbox.exec(args["cmd"], background=background)
-
-            # show the first few lines of output
-            output = result.get("stdout", "") + result.get("stderr", "")
-            for line in output.splitlines()[:5]:
-                print(f"      {line}")
+            result = sandbox.exec(args["cmd"], background=args.get("background", False))
 
             # keep huge outputs from flooding the model
             for key in ("stdout", "stderr"):
@@ -64,11 +55,9 @@ def run_tool(sandbox: Sandbox, name: str, args: dict) -> str:
             return json.dumps(result)
 
         if name == "read_file":
-            print(f"[read] {args['path']}")
             return sandbox.read_file(args["path"])
 
         if name == "write_file":
-            print(f"[write] {args['path']}")
             sandbox.write_file(args["path"], args["content"])
             return "ok"
 
@@ -79,6 +68,37 @@ def run_tool(sandbox: Sandbox, name: str, args: dict) -> str:
 
     except KeyError as e:
         return f"error: missing argument {e}"
+
+
+def print_step(name: str, args: dict, output: str) -> None:
+    """
+    Prints one tool call to the terminal
+    e.g. [run] npm install, plus the first few lines of its output
+    errors are printed too
+    """
+    if name == "run_command":
+        background = " (background)" if args.get("background") else ""
+        print(f"[run] {args.get('cmd', '')}{background}")
+
+    elif name == "read_file":
+        print(f"[read] {args.get('path', '')}")
+
+    elif name == "write_file":
+        print(f"[write] {args.get('path', '')}")
+
+    else:
+        print(f"[{name}]")
+
+    # errors: show the message
+    if output.startswith("error:"):
+        print(f"      {output}")
+
+    # commands: show the first few lines of what they printed
+    elif name == "run_command":
+        result = json.loads(output)
+        printed = result.get("stdout", "") + result.get("stderr", "")
+        for line in printed.splitlines()[:5]:
+            print(f"      {line}")
 
 
 ## AGENT LOOP ##
@@ -119,6 +139,7 @@ def run_agent(sandbox: Sandbox, task: str) -> str:
                 args = {}       # run_tool reports the missing arguments to the model
 
             output = run_tool(sandbox, call.function.name, args)
+            print_step(call.function.name, args, output)
 
             messages.append({
                 "role": "tool",
