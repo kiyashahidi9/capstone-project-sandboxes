@@ -36,7 +36,7 @@ They do different jobs and are **not** derived from each other.
 
 ## 3. Picking a slot: `claim_free_slot()`
 
-> **Open:** lower `MAX_SANDBOX_NUMBER` (now 250) to what the host can actually run (~20 at 1 GiB per VM).
+> **Open:** the 250 cap comes from the IP (`10.201.0.<n>`), but RAM is the real limit: ~20 sandboxes on the current machine at 1 GiB per VM. Lower `MAX_SANDBOX_NUMBER` to match so a full host gives a clean error.
 
 Gives each new sandbox the **lowest free slot** `n` (1, 2, 3, …). Slots are stored in SQLite:
 
@@ -150,6 +150,8 @@ That one process **is** the whole VM. Everything inside it (guest agent, `npm`, 
 ## To revisit
 
 - [ ] **`create_network()` and `scripts/netns_create.sh`.** Go back and understand what the script sets up step by step (namespace, `tap0`, veth pair, SNAT/DNAT rules, host route). Both scripts now exist, copied from Build Plan 1d; `netns_delete.sh` also clears the host's connection tracking for the slot and fails if anything is left.
+- [ ] **Host setup script (GCP only).** `node_agent.py` downloads nothing; it assumes Firecracker, `vmlinux` and `rootfs.ext4` (with the guest agent) are already in place. Write a script that downloads and installs these on a GCP VM, then save it as an image so a new node is one `gcloud` command.
+- [ ] **Hosting tradeoff: GCP only vs AWS vs any machine.** Letting clients pick their own machine (we handle virtualization setup) reaches more clients, e.g. those who want to avoid GCP or run on their laptop. Downside: their OS and hardware become our problem. Old Linux kernels, missing KVM permissions or hardware support can make Firecracker refuse to run, and macOS has no KVM at all. That's harder to support and debug.
 - [ ] **Firecracker setup calls:** `set_boot_source()`, `attach_root_drive()`, `set_machine_config()`, `attach_network()`. Each sends one of the 1c `curl` calls to Firecracker. Review what each setting means and why we chose its values (boot args, read-only vs writable disk, vCPUs/memory, MAC → guest IP).
 
 ## Stretch goals
@@ -159,3 +161,4 @@ That one process **is** the whole VM. Everything inside it (guest agent, `npm`, 
   2. **Sandbox host layer** (`node_agent.py`): numbering, folders, namespaces, cgroups, cleanup, built on the Firecracker client.
 
   **Why:** clearer boundaries, each layer testable on its own, easier for outside engineers to read. Keep them as modules in the repo; publishing to PyPI isn't worth it for the capstone.
+- [ ] **Scale horizontally to more than one host.** One host caps us at ~20 sandboxes (RAM) and 250 slots (IP). Add more GCP machines, each running its own VMs and slots, and move the DB off-host (e.g. Postgres/Cloud SQL) so the API knows which host holds each sandbox.
