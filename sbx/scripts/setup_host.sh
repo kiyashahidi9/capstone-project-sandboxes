@@ -1,57 +1,84 @@
 #!/usr/bin/env bash
-# setup_host.sh - prepare a Linux machine with KVM to run sandboxes (Milestone 1a + the rest of setup)
+# setup_host.sh - prepare a Linux machine with KVM to run sandboxes (Milestones 1a + 1b, plus 1e's install)
 #
 # Run once from the repo root:   sudo scripts/setup_host.sh
 # Safe to rerun: every step skips work that's already done.
 # Rebuild the base image from scratch:   sudo scripts/setup_host.sh --rebuild-rootfs
 #
 # Steps:
-#   1. Check the machine (root, Linux, apt)
+#   1. Check the machine and the repo
 #   2. Host packages
 #   3. KVM works (kvm-ok)
 #   4. cgroups v2
 #   5. Firecracker -> /usr/local/bin/firecracker (pinned: everyone uses the same version)
-#   6. Kernel -> ~/fc/vmlinux                                              (step 1b)
-#      Base image -> ~/fc/rootfs.ext4: Ubuntu 24.04 + python3, git, curl,
-#      nodejs, npm (4 GB), SSH key -> ~/fc/vm_key                           (step 1b)
-#   7. Guest agent baked into the image   (scripts/install_guest_agent.sh, step 1e)
-#   8. Python venv -> .venv
-#   9. Checklist
+#   6. Kernel -> ~/fc/vmlinux
+#   7. Base image -> ~/fc/rootfs.ext4: Ubuntu 24.04 + python3, git, curl, nodejs, npm;
+#      SSH key -> ~/fc/vm_key
+#   8. Guest agent baked into the image (scripts/install_guest_agent.sh)
+#   9. Python venv -> .venv
+#  10. Checklist
 #
 # Settings (environment variables):
 #   FC_VERSION      Firecracker release (default v1.18.0; "latest" picks the newest)
-#   CI_VERSION      Firecracker image folder, e.g. v1.11 (default: from the Firecracker version)
+#   CI_VERSION      Firecracker image folder (default v1.11, see docs/getting-started.md)
 #   KERNEL_SERIES   kernel version prefix (default 5.10)
 #   ROOTFS_SIZE     base image size (default 4G, room for npm install)
 set -Eeuo pipefail
 
 FC_VERSION=${FC_VERSION:-v1.18.0}
+CI_VERSION=${CI_VERSION:-v1.11}
+KERNEL_SERIES=${KERNEL_SERIES:-5.10}
+ROOTFS_SIZE=${ROOTFS_SIZE:-4G}
 ARCH=$(uname -m)
+S3=https://s3.amazonaws.com/spec.ccfc.min
+CI=$S3/firecracker-ci/$CI_VERSION/$ARCH
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 REAL_USER=${SUDO_USER:-$(id -un)}
 export FC_DIR=${FC_DIR:-$(getent passwd "$REAL_USER" | cut -d: -f6)/fc}
-KERNEL_SERIES=${KERNEL_SERIES:-5.10}
-ROOTFS_SIZE=${ROOTFS_SIZE:-4G}
-S3=https://s3.amazonaws.com/spec.ccfc.min
 REBUILD_ROOTFS=false; [[ ${1:-} == --rebuild-rootfs ]] && REBUILD_ROOTFS=true
-
-TMP=""
-cleanup() {
-  [[ -n $TMP ]] || return 0
-  mountpoint -q "$TMP/root/proc" && umount "$TMP/root/proc"
-  rm -rf "$TMP"
-}
-trap cleanup EXIT
 
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo "==> $*"; }
 
-log "1. checking the machine"
-(( EUID == 0 ))                 || die "run as root: sudo $0"
-[[ $(uname -s) == Linux ]]      || die "needs Linux"
-command -v apt-get >/dev/null   || die "needs Debian/Ubuntu (apt-get)"
-[[ -f $REPO/scripts/netns.sh ]] || die "run this from the cloned repo"
-sed -i 's/\r$//' "$REPO"/scripts/*.sh            # in case of Windows line endings
+# ---------------------------------------------------------------- temp build folder
+
+# The base image is built in a temp folder with /proc, /sys and /dev mounted into it.
+# Cleanup must unmount them BEFORE deleting the folder: deleting a mounted /dev
+# would delete the host's real device files.
+TMP=""
+CHROOT_MOUNTS=(proc sys dev/pts dev)          # unmount order: innermost first
+
+unmount_chroot() {
+  local m
+  for m in "${CHROOT_MOUNTS[@]}"; do
+    mountpoint -q "$TMP/root/$m" && umount -R "$TMP/root/$m"
+  done
+  return 0
+}
+
+cleanup() {
+  [[ -n $TMP ]] || return 0
+  unmount_chroot || true
+  if findmnt -rn -o TARGET | grep -q "^$TMP/"; then
+    echo "warning: something is still mounted under $TMP; not deleting it" >&2
+    return 0
+  fi
+  rm -rf "$TMP"
+  TMP=""
+}
+trap cleanup EXIT
+
+# ---------------------------------------------------------------- 1-5: the host
+
+log "1. checking the machine and the repo"
+(( EUID == 0 ))               || die "run as root: sudo $0"
+[[ $(uname -s) == Linux ]]    || die "needs Linux"
+command -v apt-get >/dev/null || die "needs Debian/Ubuntu (apt-get)"
+for f in scripts/netns.sh scripts/install_guest_agent.sh guest_agent/guest_agent.py requirements.txt; do
+  [[ -f $REPO/$f ]] || die "missing $f: run this from a complete clone of the repo"
+done
+# Windows line endings break bash scripts; fix only files that have them.
+grep -l $'\r' "$REPO"/scripts/*.sh 2>/dev/null | xargs -r sed -i 's/\r$//'
 chmod +x "$REPO"/scripts/*.sh
 
 log "2. host packages"
@@ -75,16 +102,19 @@ fi
 if firecracker --version 2>/dev/null | grep -q "Firecracker $FC_VERSION"; then
   echo "    already installed"
 else
-  tmp=$(mktemp -d)
+  TMP=$(mktemp -d)
   curl -fsSL "https://github.com/firecracker-microvm/firecracker/releases/download/$FC_VERSION/firecracker-$FC_VERSION-$ARCH.tgz" \
-    | tar -xz -C "$tmp"
-  install -m 0755 "$tmp/release-$FC_VERSION-$ARCH/firecracker-$FC_VERSION-$ARCH" /usr/local/bin/firecracker
-  rm -rf "$tmp"
+    | tar -xz -C "$TMP"
+  install -m 0755 "$TMP/release-$FC_VERSION-$ARCH/firecracker-$FC_VERSION-$ARCH" /usr/local/bin/firecracker
+  cleanup
 fi
 
-CI_VERSION=${CI_VERSION:-v1.11}       
-CI=$S3/firecracker-ci/$CI_VERSION/$ARCH
 mkdir -p "$FC_DIR"
+chown "$REAL_USER": "$FC_DIR"                    # yours, not root's
+
+# ---------------------------------------------------------------- 6-7: kernel and base image
+# Both are written to a .tmp file and renamed only when complete, so a failed
+# run never leaves a broken file that the next run would skip as "already there".
 
 log "6. kernel -> $FC_DIR/vmlinux"
 if [[ -s $FC_DIR/vmlinux ]]; then
@@ -93,54 +123,69 @@ else
   key=$(curl -fsSL "$S3/?prefix=firecracker-ci/$CI_VERSION/$ARCH/vmlinux-$KERNEL_SERIES&list-type=2" \
         | grep -oP "(?<=<Key>)firecracker-ci/$CI_VERSION/$ARCH/vmlinux-${KERNEL_SERIES//./[.]}[.][0-9]{1,3}(?=</Key>)" \
         | sort -V | tail -1 || true)
-  [[ -n $key ]] || die "no vmlinux-$KERNEL_SERIES in $CI_VERSION/$ARCH. Check docs/getting-started.md for your
-       Firecracker version and rerun with CI_VERSION=<folder> (e.g. v1.11) or KERNEL_SERIES=<version>."
-  curl -fsSL -o "$FC_DIR/vmlinux" "$S3/$key"
+  [[ -n $key ]] || die "no vmlinux-$KERNEL_SERIES in $CI_VERSION/$ARCH. Check docs/getting-started.md and
+       rerun with CI_VERSION=<folder> or KERNEL_SERIES=<version>."
+  curl -fsSL -o "$FC_DIR/vmlinux.tmp" "$S3/$key"
+  mv "$FC_DIR/vmlinux.tmp" "$FC_DIR/vmlinux"
 fi
 
-log "6. base image -> $FC_DIR/rootfs.ext4"
+log "7. base image -> $FC_DIR/rootfs.ext4"
 if [[ -s $FC_DIR/rootfs.ext4 ]] && ! $REBUILD_ROOTFS; then
   echo "    already there (rebuild with --rebuild-rootfs)"
 else
   TMP=$(mktemp -d)
+  ROOT=$TMP/root
+
   echo "    downloading Ubuntu 24.04"
   curl -fsSL -o "$TMP/ubuntu.squashfs" "$CI/ubuntu-24.04.squashfs" \
     || die "no ubuntu-24.04.squashfs in $CI_VERSION/$ARCH (rerun with CI_VERSION=<folder>, see docs/getting-started.md)"
-  unsquashfs -q -d "$TMP/root" "$TMP/ubuntu.squashfs"
+  unsquashfs -q -d "$ROOT" "$TMP/ubuntu.squashfs"
 
   echo "    installing python3, git, curl, nodejs, npm"
-  rm -f "$TMP/root/etc/resolv.conf"
-  echo "nameserver 8.8.8.8" > "$TMP/root/etc/resolv.conf"     # DNS for the VM, and for apt below
-  mkdir -p "$TMP/root/tmp"
-  chmod 1777 "$TMP/root/tmp"                                   # apt needs a writable /tmp inside the image
-  mount -t proc /proc "$TMP/root/proc"
-  chroot "$TMP/root" /bin/bash -c \
-    "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 git curl nodejs npm"
-  umount "$TMP/root/proc"
+  rm -f "$ROOT/etc/resolv.conf"
+  echo "nameserver 8.8.8.8" > "$ROOT/etc/resolv.conf"    # DNS for the VM, and for apt below
+  mkdir -p "$ROOT/tmp" && chmod 1777 "$ROOT/tmp"         # apt needs a writable /tmp
+  printf '#!/bin/sh\nexit 101\n' > "$ROOT/usr/sbin/policy-rc.d"   # don't start services in the chroot
+  chmod +x "$ROOT/usr/sbin/policy-rc.d"
+  mkdir -p "$ROOT/proc" "$ROOT/sys" "$ROOT/dev"
+  mount -t proc proc "$ROOT/proc"
+  mount --rbind /sys "$ROOT/sys" && mount --make-rslave "$ROOT/sys"
+  mount --bind /dev "$ROOT/dev"
+  mkdir -p "$ROOT/dev/pts" && mount --bind /dev/pts "$ROOT/dev/pts"
+  chroot "$ROOT" /bin/bash -c "apt-get update -qq \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 git curl nodejs npm \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*"
+  unmount_chroot
+  rm -f "$ROOT/usr/sbin/policy-rc.d"
 
   echo "    adding SSH key $FC_DIR/vm_key"
   [[ -s $FC_DIR/vm_key ]] || ssh-keygen -q -f "$FC_DIR/vm_key" -N ""
-  mkdir -p "$TMP/root/root/.ssh"
-  cp "$FC_DIR/vm_key.pub" "$TMP/root/root/.ssh/authorized_keys"
-  chown "$REAL_USER": "$FC_DIR/vm_key" "$FC_DIR/vm_key.pub"    # so you can ssh without sudo
+  chown "$REAL_USER": "$FC_DIR/vm_key" "$FC_DIR/vm_key.pub"   # so you can ssh without sudo
+  mkdir -p "$ROOT/root/.ssh"
+  cp "$FC_DIR/vm_key.pub" "$ROOT/root/.ssh/authorized_keys"
 
-  echo "    packing into $ROOTFS_SIZE image"
-  chown -R root:root "$TMP/root"
-  rm -f "$FC_DIR/rootfs.ext4"
-  truncate -s "$ROOTFS_SIZE" "$FC_DIR/rootfs.ext4"
-  mkfs.ext4 -q -d "$TMP/root" -F "$FC_DIR/rootfs.ext4"
-  cleanup; TMP=""
+  echo "    packing into a $ROOTFS_SIZE image"
+  chown -R root:root "$ROOT"
+  rm -f "$FC_DIR/rootfs.ext4.tmp"
+  truncate -s "$ROOTFS_SIZE" "$FC_DIR/rootfs.ext4.tmp"
+  mkfs.ext4 -q -d "$ROOT" -F "$FC_DIR/rootfs.ext4.tmp"
+  mv "$FC_DIR/rootfs.ext4.tmp" "$FC_DIR/rootfs.ext4"
+  cleanup
 fi
 
-log "7. guest agent"
+# ---------------------------------------------------------------- 8-9: guest agent and python
+
+log "8. guest agent"
 "$REPO/scripts/install_guest_agent.sh" install
 
-log "8. python venv"
+log "9. python venv"
 [[ -d $REPO/.venv ]] || python3 -m venv "$REPO/.venv"
 "$REPO/.venv/bin/pip" install -q -r "$REPO/requirements.txt"
 chown -R "$REAL_USER": "$REPO/.venv"             # so you can pip install without sudo
 
-log "9. checklist"
+# ---------------------------------------------------------------- 10: checklist
+
+log "10. checklist"
 FAILS=0
 check() { local d=$1; shift
   if "$@" &>/dev/null; then echo "  [x] $d"; else echo "  [ ] $d"; FAILS=$((FAILS + 1)); fi; }
