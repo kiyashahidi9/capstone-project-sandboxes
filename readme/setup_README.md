@@ -54,19 +54,6 @@ This takes a few minutes. It:
 and ends with a checklist. Every line should show `[x]`. It's safe to rerun. To rebuild the base
 image from scratch, run `sudo scripts/setup_host.sh --rebuild-rootfs`.
 
-## 5. Start the API (on the VM)
-
-```bash
-sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
-```
-
-The API has no authentication, so it only listens on the VM. To use it from your computer, open a
-tunnel in another terminal; then `http://localhost:8000` reaches it:
-
-```bash
-gcloud compute ssh sbx-node-1 --zone=us-east1-b -- -L 8000:localhost:8000
-```
-
 ## Stopping and starting the VM
 
 ```bash
