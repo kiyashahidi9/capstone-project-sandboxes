@@ -33,6 +33,7 @@ ARCH=$(uname -m)
 S3=https://s3.amazonaws.com/spec.ccfc.min
 CI=$S3/firecracker-ci/$CI_VERSION/$ARCH
 SCRIPTS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)                      # the folder holding this script
+VENV=$(cd "$SCRIPTS/.." && pwd)/.venv                                      # sbx/.venv
 REPO=$(git -C "$SCRIPTS" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPTS/../.." && pwd))   # repo root
 REAL_USER=${SUDO_USER:-$(id -un)}
 export FC_DIR=${FC_DIR:-$(getent passwd "$REAL_USER" | cut -d: -f6)/fc}
@@ -182,9 +183,9 @@ log "8. guest agent"
 "$SCRIPTS/install_guest_agent.sh" install
 
 log "9. python venv"
-[[ -d $REPO/.venv ]] || python3 -m venv "$REPO/.venv"
-"$REPO/.venv/bin/pip" install -q -r "$REPO/requirements.txt"
-chown -R "$REAL_USER": "$REPO/.venv"             # so you can pip install without sudo
+[[ -d $VENV ]] || python3 -m venv "$VENV"
+"$VENV/bin/pip" install -q -r "$REPO/requirements.txt"
+chown -R "$REAL_USER": "$REPO"             # so you can pip install without sudo
 
 # ---------------------------------------------------------------- 10: checklist
 
@@ -199,9 +200,9 @@ check "kernel at $FC_DIR/vmlinux"              test -s "$FC_DIR/vmlinux"
 check "base image at $FC_DIR/rootfs.ext4"      test -s "$FC_DIR/rootfs.ext4"
 check "SSH key at $FC_DIR/vm_key"              test -s "$FC_DIR/vm_key"
 check "guest agent in the base image"          "$SCRIPTS/install_guest_agent.sh" verify
-check "python venv with dependencies"          "$REPO/.venv/bin/python" -c "import fastapi, httpx, pydantic"
+check "python venv with dependencies"          "$VENV/bin/python" -c "import fastapi, httpx, pydantic"
 (( FAILS == 0 )) || die "$FAILS check(s) failed"
 
 echo
 echo "Host ready. Start the API with:"
-echo "  sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000"
+echo "  sudo sbx/.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000"
