@@ -92,7 +92,11 @@ def test_nothing_is_left_behind():
         if os.path.isdir(f"{cgroup_root}/{name}")
     ]
 
-    assert os.listdir(node_agent.SANDBOXES_ROOT) in ([], ["slots"])   # the empty slots/ folder may stay
-    assert not os.path.isdir(node_agent.slots_dir()) or os.listdir(node_agent.slots_dir()) == []
+    leftover_files = [
+        name for name in os.listdir(node_agent.SANDBOXES_ROOT)
+        if not name.startswith("state.db")              # the database (and its -wal/-shm files) stays
+    ]
+    assert leftover_files == []
+    assert node_agent.slot_holders() == []              # every slot was released
     assert leftover_cgroups == []
     assert leftover_processes.strip() == ""

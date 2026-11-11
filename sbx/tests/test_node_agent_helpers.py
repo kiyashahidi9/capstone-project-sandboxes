@@ -5,6 +5,9 @@ Fast unit tests for node_agent.py helpers. No VM, no root: run anywhere.
 """
 
 import os
+import sqlite3
+import threading
+from contextlib import closing
 
 import pytest
 
@@ -32,29 +35,34 @@ def test_names_built_from_slot_number():
 @pytest.mark.parametrize("bad_id", [
     "", "sbx", "sbx3",                       # old format is no longer accepted
     "sbx_" + "a" * 31, "sbx_" + "A" * 32,    # wrong length, uppercase
-    "sbx_" + "a" * 32 + "/..", "../etc", "slots",
+    "sbx_" + "a" * 32 + "/..", "../etc", "state.db",
 ])
 def test_validate_rejects_bad_ids(bad_id):
     with pytest.raises(ValueError):
         node_agent.validate_sandbox_id(bad_id)
 
 
-# --- slots --------------------------------------------------------------------
+# --- slots (SQLite) -------------------------------------------------------------
 
 @pytest.fixture
 def fake_sandboxes_root(tmp_path, monkeypatch):
-    """Point SANDBOXES_ROOT at a temporary folder instead of /var/sbx."""
+    """Point SANDBOXES_ROOT (and so the state database) at a temporary folder instead of /var/sbx."""
     root = str(tmp_path)          # pytest gives a Path; we use plain strings
     monkeypatch.setattr(node_agent, "SANDBOXES_ROOT", root)
     return root
 
 
+def insert_slot(n, sandbox_id):
+    """Mark slot n as taken by sandbox_id directly in the database (test setup)."""
+    with closing(node_agent.open_db()) as conn:
+        conn.execute("INSERT INTO slots (n, sandbox_id) VALUES (?, ?)", (n, sandbox_id))
+
+
 def test_claims_lowest_free_slot(fake_sandboxes_root):
-    os.makedirs(node_agent.slots_dir())
-    os.symlink("sbx_other1", node_agent.slot_path(1))
-    os.symlink("sbx_other3", node_agent.slot_path(3))
+    insert_slot(1, "sbx_" + "1" * 32)
+    insert_slot(3, "sbx_" + "3" * 32)
     assert node_agent.claim_free_slot(ID_A) == 2
-    assert os.readlink(node_agent.slot_path(2)) == ID_A
+    assert node_agent.find_slot(ID_A) == 2
     assert node_agent.claim_free_slot(ID_B) == 4
 
 
@@ -66,8 +74,33 @@ def test_raises_when_all_slots_taken(fake_sandboxes_root, monkeypatch):
         node_agent.claim_free_slot("sbx_" + "c" * 32)
 
 
+def test_a_sandbox_cannot_hold_two_slots(fake_sandboxes_root):
+    node_agent.claim_free_slot(ID_A)
+    with pytest.raises(sqlite3.IntegrityError):        # sandbox_id is UNIQUE
+        insert_slot(5, ID_A)
+
+
+def test_concurrent_claims_never_share_a_slot(fake_sandboxes_root):
+    """20 threads claim at the same moment: every one gets a different slot."""
+    ids = [f"sbx_{i:032x}" for i in range(20)]
+    start = threading.Barrier(len(ids))
+    results = {}
+
+    def claim(sandbox_id):
+        start.wait()                                   # release all threads at once
+        results[sandbox_id] = node_agent.claim_free_slot(sandbox_id)
+
+    threads = [threading.Thread(target=claim, args=(i,)) for i in ids]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sorted(results.values()) == list(range(1, 21))   # 20 different slots, no gaps
+
+
 def test_find_slot(fake_sandboxes_root):
-    assert node_agent.find_slot(ID_A) is None          # no slots folder yet
+    assert node_agent.find_slot(ID_A) is None          # empty database
     n = node_agent.claim_free_slot(ID_A)
     assert node_agent.find_slot(ID_A) == n
     assert node_agent.find_slot(ID_B) is None
@@ -84,7 +117,7 @@ def test_freed_slot_is_reused_under_a_new_id(fake_sandboxes_root):
 def test_release_does_not_free_another_sandboxes_slot(fake_sandboxes_root):
     n = node_agent.claim_free_slot(ID_B)
     node_agent.release_slot(n, ID_A)                   # A doesn't hold it
-    assert os.readlink(node_agent.slot_path(n)) == ID_B
+    assert node_agent.find_slot(ID_B) == n
     node_agent.release_slot(99, ID_A)                  # missing slot: no error
 
 
@@ -96,8 +129,7 @@ def test_require_slot_raises_lookup_error_for_unknown_sandbox(fake_sandboxes_roo
 
 
 def test_guest_agent_url(fake_sandboxes_root):
-    os.makedirs(node_agent.slots_dir())
-    os.symlink(ID_A, node_agent.slot_path(2))
+    insert_slot(2, ID_A)
     assert node_agent.guest_agent_url(ID_A, "/health") == "http://10.201.0.2:49983/health"
 
 

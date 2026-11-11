@@ -39,7 +39,7 @@ Layout on the host for sandbox <id> holding slot N:
     /var/sbx/<id>/firecracker.pid       Firecracker's process ID
     /var/sbx/<id>/console.log           the VM's serial console output
     /sys/fs/cgroup/sandboxes/<id>/      cgroup holding the Firecracker process
-    /var/sbx/slots/<N> -> <id>          symlink: "slot N belongs to <id>"
+    /var/sbx/state.db                   SQLite: table "slots" records which sandbox holds slot N
     network namespace "sbx<N>"          reached from the host at 10.201.0.<N>
 
 All paths in this file are plain strings built with f-strings.
@@ -51,9 +51,11 @@ import os
 import re
 import shutil
 import signal
+import sqlite3
 import subprocess
 import time
 import uuid
+from contextlib import closing
 from typing import Callable
 
 import httpx
@@ -163,14 +165,9 @@ def guest_ip_for(n: int) -> str:
     return f"10.201.0.{n}"
 
 
-def slots_dir() -> str:
-    """Return the folder of slot symlinks (a function, not a constant, so tests can move SANDBOXES_ROOT)."""
-    return f"{SANDBOXES_ROOT}/slots"
-
-
-def slot_path(n: int) -> str:
-    """Return the symlink that records who holds slot n, e.g. /var/sbx/slots/3."""
-    return f"{slots_dir()}/{n}"
+def db_path() -> str:
+    """Return the SQLite file that records slots (a function, not a constant, so tests can move SANDBOXES_ROOT)."""
+    return os.environ.get("SBX_DB", f"{SANDBOXES_ROOT}/state.db")
 
 
 def sandbox_dir(sandbox_id: str) -> str:
@@ -238,42 +235,70 @@ def write_text_file(path: str, text: str) -> None:
 # ---------------------------------------------------------------------------
 # Network slots
 #
-# The symlink slots/<n> -> <id> is the only record on the host of which
-# sandbox holds which slot, so there is no second copy to drift out of sync.
+# The "slots" table in /var/sbx/state.db is the only record of which sandbox
+# holds which slot, so there is no second copy to drift out of sync. The API
+# server (1g) keeps its own "sandboxes" table in the same file.
+#
+# Every function opens its own connection, because the API server calls us
+# from several threads and a SQLite connection shouldn't be shared between
+# threads. Each statement below is atomic on its own (SQLite wraps it in a
+# transaction), so none of them needs BEGIN ... COMMIT.
 # ---------------------------------------------------------------------------
 
+SLOTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS slots (
+    n           INTEGER PRIMARY KEY CHECK (n BETWEEN 1 AND 250),  -- one row per taken slot
+    sandbox_id  TEXT NOT NULL UNIQUE                              -- a sandbox holds at most one slot
+)
+"""
+
+DB_BUSY_TIMEOUT = 5.0             # seconds a writer waits for another writer before giving up
+
+
+def open_db() -> sqlite3.Connection:
+    """Open the state database, creating the file and the slots table if needed."""
+    os.makedirs(SANDBOXES_ROOT, exist_ok=True)
+    conn = sqlite3.connect(
+        db_path(),
+        timeout=DB_BUSY_TIMEOUT,  # a second writer waits instead of failing with "database is locked"
+        isolation_level=None,     # autocommit: each statement is its own transaction
+    )
+    conn.execute("PRAGMA journal_mode=WAL")   # readers aren't blocked while someone writes
+    conn.execute(SLOTS_SCHEMA)
+    return conn
+
+
 def claim_free_slot(sandbox_id: str) -> int:
-    """Reserve the lowest free slot by creating slots/<n> -> sandbox_id, and return n."""
-    os.makedirs(slots_dir(), exist_ok=True)
-    for n in range(MIN_SANDBOX_NUMBER, MAX_SANDBOX_NUMBER + 1):
-        try:
-            os.symlink(sandbox_id, slot_path(n))   # fails if taken; check + create in one step, so no two callers get the same n
-            return n
-        except FileExistsError:
-            continue
+    """Reserve the lowest free slot by inserting (n, sandbox_id), and return n."""
+    with closing(open_db()) as conn:
+        for n in range(MIN_SANDBOX_NUMBER, MAX_SANDBOX_NUMBER + 1):
+            try:
+                # One INSERT = check + claim in one step: the PRIMARY KEY on n
+                # rejects it if the slot is taken, so no two callers get the same n.
+                conn.execute("INSERT INTO slots (n, sandbox_id) VALUES (?, ?)", (n, sandbox_id))
+                return n
+            except sqlite3.IntegrityError:
+                continue
     raise RuntimeError(f"all {MAX_SANDBOX_NUMBER} sandbox slots are in use")
 
 
 def find_slot(sandbox_id: str) -> int | None:
     """Return the slot this sandbox holds, or None if it holds none."""
-    if not os.path.isdir(slots_dir()):
-        return None
-    for name in os.listdir(slots_dir()):
-        try:
-            if os.readlink(f"{slots_dir()}/{name}") == sandbox_id:
-                return int(name)
-        except (FileNotFoundError, OSError, ValueError):
-            continue                               # released mid-scan, or not one of our symlinks
-    return None
+    with closing(open_db()) as conn:
+        row = conn.execute("SELECT n FROM slots WHERE sandbox_id = ?", (sandbox_id,)).fetchone()
+    return row[0] if row else None
 
 
 def release_slot(n: int, sandbox_id: str) -> None:
     """Free slot n, but only if this sandbox still holds it."""
-    try:
-        if os.readlink(slot_path(n)) == sandbox_id:
-            os.remove(slot_path(n))
-    except FileNotFoundError:
-        pass
+    with closing(open_db()) as conn:
+        conn.execute("DELETE FROM slots WHERE n = ? AND sandbox_id = ?", (n, sandbox_id))
+
+
+def slot_holders() -> list[str]:
+    """Return the IDs of every sandbox that holds a slot."""
+    with closing(open_db()) as conn:
+        return [row[0] for row in conn.execute("SELECT sandbox_id FROM slots ORDER BY n")]
 
 
 def require_slot(sandbox_id: str) -> int:
@@ -604,17 +629,9 @@ def is_sandbox_running(sandbox_id: str) -> bool:
 
 def list_host_sandboxes() -> list[str]:
     """Return the IDs of every sandbox that has a folder or holds a slot on this host."""
-    ids = set()
+    ids = set(slot_holders())
     if os.path.isdir(SANDBOXES_ROOT):
         ids.update(name for name in os.listdir(SANDBOXES_ROOT) if SANDBOX_ID_PATTERN.fullmatch(name))
-    if os.path.isdir(slots_dir()):
-        for name in os.listdir(slots_dir()):
-            try:
-                target = os.readlink(f"{slots_dir()}/{name}")
-            except OSError:
-                continue
-            if SANDBOX_ID_PATTERN.fullmatch(target):
-                ids.add(target)
     return sorted(ids)
 
 
