@@ -1,24 +1,29 @@
 # Setup
 
-Sandboxes run on a Linux VM with KVM. These steps create one on Google Cloud and set it up.
+Sandboxes are Firecracker microVMs, which need a Linux host with KVM.
+These steps create the host on Google Cloud and set it up.
 
 ## 1. Install the Google Cloud CLI (on your computer)
 
-Follow https://cloud.google.com/sdk/docs/install, then log in and pick your project:
+Install it from https://cloud.google.com/sdk/docs/install, then log in and choose your project:
 
 ```bash
 gcloud init
 ```
 
-## 2. Create the VM
+## 2. Create the host VM
 
-Nested virtualization lets Firecracker run VMs inside it. The free `e2-micro` can't do this, so use an N2 machine.
+A normal cloud VM doesn't expose KVM, so turn on nested virtualization. Use an Intel machine type
+such as N2, where it's best supported.
 
 ```bash
 gcloud compute instances create sbx-node-1 \
-  --zone=us-east1-b --machine-type=n2-standard-4 \
-  --image-family=ubuntu-2404-lts-amd64 --image-project=ubuntu-os-cloud \
-  --boot-disk-size=50GB --enable-nested-virtualization
+  --zone=us-east1-b \
+  --machine-type=n2-standard-8 \
+  --image-family=ubuntu-2404-lts-amd64 \
+  --image-project=ubuntu-os-cloud \
+  --boot-disk-size=200GB \
+  --enable-nested-virtualization
 ```
 
 ## 3. Connect to it
@@ -27,7 +32,7 @@ gcloud compute instances create sbx-node-1 \
 gcloud compute ssh sbx-node-1 --zone=us-east1-b
 ```
 
-For VS Code Remote-SSH, run `gcloud compute config-ssh` (again after every restart, since the IP changes).
+For VS Code Remote-SSH, run `gcloud compute config-ssh` (again after each restart; the IP changes).
 
 ## 4. Set up the host (on the VM)
 
@@ -37,15 +42,46 @@ cd capstone-project-sandboxes
 sudo scripts/setup_host.sh
 ```
 
-This installs Firecracker and host packages, downloads the kernel and base image into `~/fc`,
-bakes the guest agent into the image, and creates `.venv`. It ends with a checklist; every line
-should show `[x]`. It's safe to rerun.
+This takes a few minutes. It:
+
+1. installs host packages and checks KVM (`kvm-ok`) and cgroups v2,
+2. installs Firecracker (pinned version, so everyone matches),
+3. downloads the kernel and builds the base image in `~/fc`: Ubuntu 24.04 with Python, git and Node,
+4. bakes the guest agent into the image (`scripts/install_guest_agent.sh`),
+5. creates the Python environment `.venv`,
+
+and ends with a checklist. Every line should show `[x]`. It's safe to rerun. To rebuild the base
+image from scratch, run `sudo scripts/setup_host.sh --rebuild-rootfs`.
+
+## 5. Start the API (on the VM)
+
+```bash
+sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
+```
+
+The API has no authentication, so it only listens on the VM. To use it from your computer, open a
+tunnel in another terminal; then `http://localhost:8000` reaches it:
+
+```bash
+gcloud compute ssh sbx-node-1 --zone=us-east1-b -- -L 8000:localhost:8000
+```
 
 ## Stopping and starting the VM
 
 ```bash
-gcloud compute instances stop sbx-node-1 --zone=us-east1-b    # stops billing for CPU/RAM
+gcloud compute instances stop sbx-node-1 --zone=us-east1-b
 gcloud compute instances start sbx-node-1 --zone=us-east1-b
 ```
 
-Stopping ends every running sandbox. Start the API again (step 5) after starting the VM.
+Stopping ends every running sandbox. After starting, run step 5 again.
+
+## Troubleshooting
+
+- **`KVM not available`**: the VM was created without `--enable-nested-virtualization`, or on a
+  machine type that doesn't support it. Recreate it with step 2.
+- **`no vmlinux-5.10` or `no ubuntu-24.04.squashfs`**: Firecracker's image folder differs for your
+  version. Check `docs/getting-started.md` for it and rerun with
+  `sudo CI_VERSION=v1.11 scripts/setup_host.sh` (use the folder it names).
+- **Sandbox creation times out waiting for `/health`**: the guest agent isn't in the image. Run
+  `sudo scripts/install_guest_agent.sh verify`.
+- **`$'\r': command not found`**: Windows line endings. Add `*.sh text eol=lf` to `.gitattributes`.
