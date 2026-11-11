@@ -2,7 +2,7 @@
 
     python -m example_agent.agent_openai "create hello.py that prints hello, and run it"
 
-Run from the repo root.
+Run from sbx/.
 
 Needs: pip install openai httpx python-dotenv, OPENAI_API_KEY in .env,
 and the API (or mock) running. Optional: SANDBOX_API (default http://localhost:8000).

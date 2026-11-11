@@ -2,7 +2,7 @@
 
 No OpenAI key needed, just a running API (the mock, or the real one via SANDBOX_API).
 
-Run from the repo root: python -m sdk.smoke_test
+Run from sbx/: python -m sdk.smoke_test
 """
 
 ## IMPORTS ##

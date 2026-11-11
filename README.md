@@ -7,16 +7,30 @@ Locally, a mock API and a Docker container stand in for the real Firecracker VMs
 example_agent → sdk → mock API (:8000) → guest agent in Docker (:49983)
 ```
 
-## Setup
+## Layout
 
-Run everything from the repo root.
+All program code lives in `sbx/`. The `.env` file stays at the repo root.
+
+```
+sbx/
+  client/          interactive chat agent (one sandbox across tasks)
+  example_agent/   one-shot OpenAI coding agent
+  guest_agent/     HTTP server that runs inside the "VM"
+  mock/            mock sandbox API
+  sdk/             Python SDK + smoke test
+```
+
+## Setup
 
 ```bash
 # install dependencies
 pip install fastapi uvicorn httpx openai python-dotenv
 
-# set up env vars, then fill in OPENAI_API_KEY in .env
+# set up env vars (at the repo root), then fill in OPENAI_API_KEY in .env
 cp .env.example .env
+
+# run every command below from sbx/
+cd sbx
 
 # terminal 1: start the guest agent (runs commands / files inside the "VM")
 # works as-is in Git Bash (Windows), Linux and macOS
@@ -41,7 +55,7 @@ python -m example_agent.agent_openai "create hello.py that prints hello, and run
 Or start the client agent, an interactive chat that keeps one sandbox open across tasks:
 
 ```bash
-# must be run as a module from the repo root
+# must be run as a module from sbx/
 python -m client.client
 ```
 

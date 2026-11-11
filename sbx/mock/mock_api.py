@@ -4,7 +4,7 @@ Same endpoints, JSON and status codes as the API contract. Every "sandbox" forwa
 exec/files to ONE guest agent running in Docker, so all sandboxes share one filesystem
 here. That's fine for SDK and agent work; isolation is tested in 1f, not here.
 
-Run from the repo root (Git Bash on Windows):
+Run from sbx/ (Git Bash on Windows):
   pip install fastapi uvicorn httpx python-dotenv
   MSYS_NO_PATHCONV=1 docker run --rm -p 49983:49983 -v "$(pwd -W)/guest_agent:/app" -w /app python:3.12 python guest_agent.py
   uvicorn mock.mock_api:app --port 8000
