@@ -79,7 +79,7 @@ for f in "$SCRIPTS/netns.sh" "$SCRIPTS/install_guest_agent.sh" "$SCRIPTS/../gues
   [[ -f $f ]] || die "missing $(realpath -m "$f"): run this from a complete clone of the repo"
 done
 # Windows line endings break bash scripts; fix only files that have them.
-grep -l $'\r' "$SCRIPTS"/*.sh 2>/dev/null | xargs -r sed -i 's/\r$//'
+grep -l $'\r' "$SCRIPTS"/*.sh 2>/dev/null | xargs -r sed -i 's/\r$//' || true
 chmod +x "$SCRIPTS"/*.sh
 
 log "2. host packages"
