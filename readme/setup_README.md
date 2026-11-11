@@ -35,11 +35,10 @@ gcloud compute ssh sbx-node-1 --zone=us-east1-b
 For VS Code Remote-SSH, run `gcloud compute config-ssh` (again after each restart; the IP changes).
 
 ## 4. Set up the host (on the VM)
-make sure to clone the branch with the setup (1-setup_host) for now
+
 ```bash
-git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git -b 1-setup_host
-cd capstone-project-sandboxes/sbx
-chmod +x scripts/*
+git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git
+cd capstone-project-sandboxes
 sudo scripts/setup_host.sh
 ```
 
@@ -53,6 +52,19 @@ This takes a few minutes. It:
 
 and ends with a checklist. Every line should show `[x]`. It's safe to rerun. To rebuild the base
 image from scratch, run `sudo scripts/setup_host.sh --rebuild-rootfs`.
+
+## 5. Start the API (on the VM)
+
+```bash
+sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
+```
+
+The API has no authentication, so it only listens on the VM. To use it from your computer, open a
+tunnel in another terminal; then `http://localhost:8000` reaches it:
+
+```bash
+gcloud compute ssh sbx-node-1 --zone=us-east1-b -- -L 8000:localhost:8000
+```
 
 ## Stopping and starting the VM
 

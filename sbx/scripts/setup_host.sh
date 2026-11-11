@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # setup_host.sh - prepare a Linux machine with KVM to run sandboxes (Milestones 1a + 1b, plus 1e's install)
 #
-# Run once from the repo root:   sudo scripts/setup_host.sh
+# Run once from the repo root:   sudo sbx/scripts/setup_host.sh
 # Safe to rerun: every step skips work that's already done.
-# Rebuild the base image from scratch:   sudo scripts/setup_host.sh --rebuild-rootfs
+# Rebuild the base image from scratch:   sudo sbx/scripts/setup_host.sh --rebuild-rootfs
 #
 # Steps:
 #   1. Check the machine and the repo
@@ -14,8 +14,8 @@
 #   6. Kernel -> ~/fc/vmlinux
 #   7. Base image -> ~/fc/rootfs.ext4: Ubuntu 24.04 + python3, git, curl, nodejs, npm;
 #      SSH key -> ~/fc/vm_key
-#   8. Guest agent baked into the image (scripts/install_guest_agent.sh)
-#   9. Python venv -> .venv
+#   8. Guest agent baked into the image (install_guest_agent.sh, next to this script)
+#   9. Python venv -> .venv in the repo root
 #  10. Checklist
 #
 # Settings (environment variables):
@@ -32,7 +32,8 @@ ROOTFS_SIZE=${ROOTFS_SIZE:-4G}
 ARCH=$(uname -m)
 S3=https://s3.amazonaws.com/spec.ccfc.min
 CI=$S3/firecracker-ci/$CI_VERSION/$ARCH
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+SCRIPTS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)                      # the folder holding this script
+REPO=$(git -C "$SCRIPTS" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPTS/../.." && pwd))   # repo root
 REAL_USER=${SUDO_USER:-$(id -un)}
 export FC_DIR=${FC_DIR:-$(getent passwd "$REAL_USER" | cut -d: -f6)/fc}
 REBUILD_ROOTFS=false; [[ ${1:-} == --rebuild-rootfs ]] && REBUILD_ROOTFS=true
@@ -74,12 +75,12 @@ log "1. checking the machine and the repo"
 (( EUID == 0 ))               || die "run as root: sudo $0"
 [[ $(uname -s) == Linux ]]    || die "needs Linux"
 command -v apt-get >/dev/null || die "needs Debian/Ubuntu (apt-get)"
-for f in scripts/netns.sh scripts/install_guest_agent.sh guest_agent/guest_agent.py requirements.txt; do
-  [[ -f $REPO/$f ]] || die "missing $f: run this from a complete clone of the repo"
+for f in "$SCRIPTS/netns.sh" "$SCRIPTS/install_guest_agent.sh" "$SCRIPTS/../guest_agent/guest_agent.py" "$REPO/requirements.txt"; do
+  [[ -f $f ]] || die "missing $(realpath -m "$f"): run this from a complete clone of the repo"
 done
 # Windows line endings break bash scripts; fix only files that have them.
-grep -l $'\r' "$REPO"/scripts/*.sh 2>/dev/null | xargs -r sed -i 's/\r$//'
-chmod +x "$REPO"/scripts/*.sh
+grep -l $'\r' "$SCRIPTS"/*.sh 2>/dev/null | xargs -r sed -i 's/\r$//'
+chmod +x "$SCRIPTS"/*.sh
 
 log "2. host packages"
 apt-get update -qq
@@ -176,7 +177,7 @@ fi
 # ---------------------------------------------------------------- 8-9: guest agent and python
 
 log "8. guest agent"
-"$REPO/scripts/install_guest_agent.sh" install
+"$SCRIPTS/install_guest_agent.sh" install
 
 log "9. python venv"
 [[ -d $REPO/.venv ]] || python3 -m venv "$REPO/.venv"
@@ -195,7 +196,7 @@ check "firecracker $FC_VERSION on PATH"        bash -c "firecracker --version | 
 check "kernel at $FC_DIR/vmlinux"              test -s "$FC_DIR/vmlinux"
 check "base image at $FC_DIR/rootfs.ext4"      test -s "$FC_DIR/rootfs.ext4"
 check "SSH key at $FC_DIR/vm_key"              test -s "$FC_DIR/vm_key"
-check "guest agent in the base image"          "$REPO/scripts/install_guest_agent.sh" verify
+check "guest agent in the base image"          "$SCRIPTS/install_guest_agent.sh" verify
 check "python venv with dependencies"          "$REPO/.venv/bin/python" -c "import fastapi, httpx, pydantic"
 (( FAILS == 0 )) || die "$FAILS check(s) failed"
 
