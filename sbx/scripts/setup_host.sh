@@ -82,7 +82,7 @@ else
   rm -rf "$tmp"
 fi
 
-CI_VERSION=${CI_VERSION:-${FC_VERSION%.*}}       # v1.18.0 -> v1.18
+CI_VERSION=${CI_VERSION:-v1.11}       
 CI=$S3/firecracker-ci/$CI_VERSION/$ARCH
 mkdir -p "$FC_DIR"
 

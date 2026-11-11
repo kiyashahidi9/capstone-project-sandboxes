@@ -35,10 +35,11 @@ gcloud compute ssh sbx-node-1 --zone=us-east1-b
 For VS Code Remote-SSH, run `gcloud compute config-ssh` (again after each restart; the IP changes).
 
 ## 4. Set up the host (on the VM)
-
+make sure to clone the branch with the setup (1-setup_host) for now
 ```bash
-git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git
-cd capstone-project-sandboxes
+git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git -b 1-setup_host
+cd capstone-project-sandboxes/sbx
+chmod +x scripts/*
 sudo scripts/setup_host.sh
 ```
 
