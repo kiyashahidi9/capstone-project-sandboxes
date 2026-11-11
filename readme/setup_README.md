@@ -37,8 +37,9 @@ For VS Code Remote-SSH, run `gcloud compute config-ssh` (again after each restar
 ## 4. Set up the host (on the VM)
 
 ```bash
-git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git
-cd capstone-project-sandboxes
+git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git -b 1-setup_host
+cd capstone-project-sandboxes/sbx
+chmod +x scripts/*
 sudo scripts/setup_host.sh
 ```
 
