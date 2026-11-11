@@ -53,19 +53,6 @@ This takes a few minutes. It:
 and ends with a checklist. Every line should show `[x]`. It's safe to rerun. To rebuild the base
 image from scratch, run `sudo scripts/setup_host.sh --rebuild-rootfs`.
 
-## 5. Start the API (on the VM)
-
-```bash
-sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
-```
-
-The API has no authentication, so it only listens on the VM. To use it from your computer, open a
-tunnel in another terminal; then `http://localhost:8000` reaches it:
-
-```bash
-gcloud compute ssh sbx-node-1 --zone=us-east1-b -- -L 8000:localhost:8000
-```
-
 ## Stopping and starting the VM
 
 ```bash
@@ -74,14 +61,3 @@ gcloud compute instances start sbx-node-1 --zone=us-east1-b
 ```
 
 Stopping ends every running sandbox. After starting, run step 5 again.
-
-## Troubleshooting
-
-- **`KVM not available`**: the VM was created without `--enable-nested-virtualization`, or on a
-  machine type that doesn't support it. Recreate it with step 2.
-- **`no vmlinux-5.10` or `no ubuntu-24.04.squashfs`**: Firecracker's image folder differs for your
-  version. Check `docs/getting-started.md` for it and rerun with
-  `sudo CI_VERSION=v1.11 scripts/setup_host.sh` (use the folder it names).
-- **Sandbox creation times out waiting for `/health`**: the guest agent isn't in the image. Run
-  `sudo scripts/install_guest_agent.sh verify`.
-- **`$'\r': command not found`**: Windows line endings. Add `*.sh text eol=lf` to `.gitattributes`.
