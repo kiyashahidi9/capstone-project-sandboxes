@@ -20,7 +20,7 @@ cp .env.example .env
 
 # terminal 1: start the guest agent (runs commands / files inside the "VM")
 # works as-is in Git Bash (Windows), Linux and macOS
-MSYS_NO_PATHCONV=1 docker run --rm -p 49983:49983 -v "$(pwd -W 2>/dev/null || pwd)/guest_agent:/app" -w /app python:3.12 python guest_agent.py
+MSYS_NO_PATHCONV=1 docker run --rm -p 49983:49983 -v "$(pwd -W 2>/dev/null || pwd)/guest_agent:/app" -w /app nikolaik/python-nodejs:python3.12-nodejs20 python guest_agent.py
 
 # terminal 2: start the mock API (fake sandboxes, forwards to the guest agent)
 uvicorn mock.mock_api:app --port 8000
@@ -70,4 +70,8 @@ done
 ```
 sandbox sb1 ready
 > clone https://github.com/kiyashahidi9/example-express-app and start the dev server
+> curl the health check
+> add a /time route that returns the current time, then curl it
+> make the time return in EST
+> /quit
 ```
