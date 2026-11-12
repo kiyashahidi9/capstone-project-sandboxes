@@ -1,12 +1,3 @@
-"""Quick SDK-only check: create a sandbox, use every method, destroy it.
-
-No OpenAI key needed, just a running API (the mock, or the real one via SANDBOX_API).
-
-Run from sbx/: uv run python -m sdk.smoke_test
-"""
-
-## IMPORTS ##
-
 from sdk.sandbox import Sandbox
 
 

@@ -4,6 +4,7 @@
 # ...except the sbx folder, shared repo config, and this file
 !/sbx/
 !/.gitignore
+!/README.md
 !/.githooks/
 !/.env.example
 

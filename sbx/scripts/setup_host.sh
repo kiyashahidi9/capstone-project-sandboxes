@@ -15,7 +15,7 @@
 #   7. Base image -> ~/fc/rootfs.ext4: Ubuntu 24.04 + python3, git, curl, nodejs, npm;
 #      SSH key -> ~/fc/vm_key
 #   8. Guest agent baked into the image (install_guest_agent.sh, next to this script)
-#   9. Python venv -> .venv in the repo root
+#   9. Python deps -> sbx/.venv via uv sync (installs uv for you if missing)
 #  10. Checklist
 #
 # Settings (environment variables):
@@ -76,7 +76,7 @@ log "1. checking the machine and the repo"
 (( EUID == 0 ))               || die "run as root: sudo $0"
 [[ $(uname -s) == Linux ]]    || die "needs Linux"
 command -v apt-get >/dev/null || die "needs Debian/Ubuntu (apt-get)"
-for f in "$SCRIPTS/netns.sh" "$SCRIPTS/install_guest_agent.sh" "$SCRIPTS/../guest_agent/guest_agent.py" "$REPO/requirements.txt"; do
+for f in "$SCRIPTS/netns.sh" "$SCRIPTS/install_guest_agent.sh" "$SCRIPTS/../guest_agent/guest_agent.py" "$SCRIPTS/../pyproject.toml" "$SCRIPTS/../uv.lock"; do
   [[ -f $f ]] || die "missing $(realpath -m "$f"): run this from a complete clone of the repo"
 done
 # Windows line endings break bash scripts; fix only files that have them.
@@ -87,7 +87,7 @@ log "2. host packages"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   curl wget jq git squashfs-tools e2fsprogs iproute2 iptables \
-  python3 python3-venv python3-pip cpu-checker
+  python3 cpu-checker
 
 log "3. KVM"
 kvm-ok >/dev/null || die "KVM not available. On GCP, recreate the VM with --enable-nested-virtualization
@@ -182,10 +182,16 @@ fi
 log "8. guest agent"
 "$SCRIPTS/install_guest_agent.sh" install
 
-log "9. python venv"
-[[ -d $VENV ]] || python3 -m venv "$VENV"
-"$VENV/bin/pip" install -q -r "$REPO/requirements.txt"
-chown -R "$REAL_USER": "$REPO"             # so you can pip install without sudo
+log "9. python deps (uv sync)"
+chown -R "$REAL_USER": "$REPO"             # the repo and its .venv belong to you, not root
+USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+UV=$(sudo -u "$REAL_USER" -H bash -lc 'command -v uv' 2>/dev/null || true)
+[[ -n $UV ]] || UV=$USER_HOME/.local/bin/uv  # where the uv installer puts it
+if [[ ! -x $UV ]]; then
+  echo "    installing uv for $REAL_USER"
+  sudo -u "$REAL_USER" -H sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh' >/dev/null
+fi
+sudo -u "$REAL_USER" -H "$UV" sync --locked --directory "$(dirname "$VENV")" -q
 
 # ---------------------------------------------------------------- 10: checklist
 

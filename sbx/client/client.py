@@ -1,10 +1,3 @@
-"""Terminal chat: type a task, an OpenAI agent does it in a sandbox. /quit to exit.
-
-Run from sbx/: uv run python -m client.client
-"""
-
-## IMPORTS ##
-
 import json
 import posixpath
 

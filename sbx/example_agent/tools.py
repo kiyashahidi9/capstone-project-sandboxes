@@ -1,5 +1,3 @@
-"""Tool schemas the example agent can call (OpenAI function-calling format)."""
-
 TOOLS = [
     {
         "type": "function",

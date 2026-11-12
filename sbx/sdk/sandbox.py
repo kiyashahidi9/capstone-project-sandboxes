@@ -1,18 +1,3 @@
-"""sdk/sandbox.py - thin Python wrapper over the sandbox API (Milestone 1h).
-
-Each method is one HTTP call to the API; there is no other logic here.
-
-    from sdk.sandbox import Sandbox
-
-    sbx = Sandbox.create()                      # POST   /sandboxes
-    sbx.exec("echo hi")                         # POST   /sandboxes/{id}/exec
-    sbx.write_file("/root/x.txt", "hello")      # PUT    /sandboxes/{id}/files?path=
-    sbx.read_file("/root/x.txt")                # GET    /sandboxes/{id}/files?path=
-    sbx.destroy()                               # DELETE /sandboxes/{id}
-
-The API address defaults to $SANDBOX_API, else http://localhost:8000
-(the mock API locally, the real API on the host later: no code changes).
-"""
 import os
 import httpx
 from dotenv import load_dotenv

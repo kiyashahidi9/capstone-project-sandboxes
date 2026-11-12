@@ -1,9 +1,3 @@
-"""
-Fast unit tests for node_agent.py helpers. No VM, no root: run anywhere.
-
-    uv run pytest tests/test_node_agent_helpers.py -v
-"""
-
 import os
 import sqlite3
 import threading
@@ -70,7 +64,7 @@ def test_raises_when_all_slots_taken(fake_sandboxes_root, monkeypatch):
     monkeypatch.setattr(node_agent, "MAX_SANDBOX_NUMBER", 2)
     node_agent.claim_free_slot(ID_A)
     node_agent.claim_free_slot(ID_B)
-    with pytest.raises(RuntimeError, match="in use"):
+    with pytest.raises(node_agent.NoFreeSlotsError, match="in use"):
         node_agent.claim_free_slot("sbx_" + "c" * 32)
 
 

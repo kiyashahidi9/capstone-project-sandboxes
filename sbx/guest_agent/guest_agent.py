@@ -1,28 +1,4 @@
 #!/usr/bin/env python3
-"""guest_agent.py - small HTTP server inside the VM (Milestone 1e).
-
-Everything outside the VM runs commands and reads/writes files through this.
-Same port as E2B's envd (49983). Standard library only, so nothing needs
-installing inside the VM.
-
-Endpoints:
-  GET  /health                       -> {"ok": true}
-  POST /exec   {"cmd", "cwd"?, "timeout"?}
-                                     -> {"exit_code", "stdout", "stderr", "timed_out"}
-  POST /exec   {"cmd", "cwd"?, "background": true}
-                                     -> {"pid"}  (output in /tmp/bg-<pid>.log)
-  GET  /files?path=/abs/path         -> raw file contents, or 404
-  PUT  /files?path=/abs/path  body   -> {"ok": true}  (creates parent folders)
-
-No auth: only the host can reach the VM (10.201.0.N is routed on the host only).
-
-open questions
-- should we use FastAPI for this agent? we would have to install it into every VM
-- 
-"""
-
-## IMPORTS ##
-
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

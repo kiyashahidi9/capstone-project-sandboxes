@@ -1,6 +1,3 @@
-"""Tool schemas the agent can call (OpenAI function-calling format)."""
-
-
 def build_tools(workdir: str) -> list[dict]:
     """Builds the tool schemas, telling the model which directory it works in."""
     path_rule = f"Relative paths are resolved against {workdir}; absolute paths are used as-is."

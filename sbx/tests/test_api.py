@@ -1,5 +1,3 @@
-"""Sandbox routes with a fake boot. No VM and no root."""
-
 import re
 from contextlib import closing
 
@@ -93,6 +91,20 @@ def test_failed_boot_marks_the_row_destroyed(client, monkeypatch):
     assert len(rows) == 1
     assert rows[0].state == SandboxState.DESTROYED
     assert rows[0].n is None
+
+
+def test_full_host_answers_503_and_marks_the_row_destroyed(client, monkeypatch):
+    def full(sandbox_id: str | None = None) -> node_agent.Sandbox:
+        raise node_agent.NoFreeSlotsError("all 250 sandbox slots are in use")
+
+    monkeypatch.setattr(node_agent, "create_sandbox", full)
+    response = client.post("/sandboxes")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "No sandbox slots available"
+    rows = db.list_sandboxes()
+    assert len(rows) == 1
+    assert rows[0].state == SandboxState.DESTROYED
 
 
 def boot_into_slot(sandbox_id: str | None, n: int) -> node_agent.Sandbox:

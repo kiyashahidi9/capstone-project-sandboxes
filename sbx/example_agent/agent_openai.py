@@ -1,15 +1,3 @@
-"""example_agent/agent_openai.py - the 1h example agent, using OpenAI.
-
-    uv run python -m example_agent.agent_openai "create hello.py that prints hello, and run it"
-
-Run from sbx/.
-
-Needs: uv sync, OPENAI_API_KEY in .env,
-and the API (or mock) running. Optional: SANDBOX_API (default http://localhost:8000).
-"""
-
-## IMPORTS ##
-
 import json
 import sys
 

@@ -1,5 +1,3 @@
-"""Helpers for the sandbox API. The routes stay in main.py."""
-
 from __future__ import annotations
 
 import httpx
@@ -22,6 +20,7 @@ HTTP_NOT_FOUND = 404
 HTTP_CONFLICT = 409
 HTTP_SERVER_ERROR = 500
 HTTP_BAD_GATEWAY = 502
+HTTP_SERVICE_UNAVAILABLE = 503
 HTTP_CREATED = 201
 
 
@@ -50,9 +49,12 @@ def require_running(sandbox_id: str) -> SandboxRow:
 # ---------------------------------------------------------------------------
 
 def boot_sandbox(sandbox_id: str) -> node_agent.Sandbox:
-    """Starts the VM for a recorded sandbox, or answers 500 after marking it destroyed."""
+    """Starts the VM for a recorded sandbox, or marks it destroyed and answers 503 (host full) or 500."""
     try:
         return node_agent.create_sandbox(sandbox_id)
+    except node_agent.NoFreeSlotsError as error:
+        db.set_state(sandbox_id, SandboxState.DESTROYED)
+        raise HTTPException(status_code=HTTP_SERVICE_UNAVAILABLE, detail="No sandbox slots available") from error
     except Exception as error:
         db.set_state(sandbox_id, SandboxState.DESTROYED)
         raise HTTPException(status_code=HTTP_SERVER_ERROR, detail="Sandbox failed to start") from error
