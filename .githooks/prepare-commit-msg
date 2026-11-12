@@ -1,0 +1,10 @@
+#!/bin/sh
+ME=$(git config user.email)
+
+COAUTHORS="Co-authored-by: Kiya Shahidi <kiyashahidi9@gmail.com>
+Co-authored-by: Lily Xiong <lileexanim@gmail.com>
+Co-authored-by: Aidan Evans <aidan.e.tech@gmail.com>"
+
+COAUTHORS=$(printf "%s\n" "$COAUTHORS" | grep -v "<$ME>")
+
+grep -q "Co-authored-by" "$1" || printf "\n%s\n" "$COAUTHORS" >> "$1"
