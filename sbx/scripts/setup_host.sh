@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # setup_host.sh - prepare a Linux machine with KVM to run sandboxes (Milestones 1a + 1b, plus 1e's install)
 #
-# Run once from the repo root:   sudo sbx/scripts/setup_host.sh
+# Run once from sbx/:   sudo scripts/setup_host.sh
 # Safe to rerun: every step skips work that's already done.
-# Rebuild the base image from scratch:   sudo sbx/scripts/setup_host.sh --rebuild-rootfs
+# Rebuild the base image from scratch:   sudo scripts/setup_host.sh --rebuild-rootfs
 #
 # Steps:
 #   1. Check the machine and the repo
