@@ -1,5 +1,3 @@
-"""HTTP routes for sandboxes. Helper functions live in helpers.py."""
-
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -44,7 +42,7 @@ from api.models import (
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Gets the database ready before the server starts taking requests."""
-    ...  # db.create_tables(); later: reconcile the DB with node_agent.list_host_sandboxes()
+    db.create_tables();
     yield
 
 

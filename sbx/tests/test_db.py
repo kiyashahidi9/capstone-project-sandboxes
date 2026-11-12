@@ -1,9 +1,3 @@
-"""
-Unit tests for api/db.py against a temporary SQLite file. No VM, no root: run anywhere.
-
-    uv run pytest tests/test_db.py -v
-"""
-
 import re
 import sqlite3
 from contextlib import closing

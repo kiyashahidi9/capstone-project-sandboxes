@@ -1,50 +1,3 @@
-"""
-node_agent.py — control Firecracker sandboxes from Python (Build Plan step 1f).
-
-This module does in code what steps 1c–1e did by hand: copy a disk, create a
-network namespace, start Firecracker, configure and boot the VM, and talk to
-the guest agent running inside it. There is no web server here; the API
-server in step 1g imports these functions.
-
-Public functions (everything else in this file is a helper for these):
-
-    create_sandbox(sandbox_id=None)           -> Sandbox
-    destroy_sandbox(sandbox_id)
-    exec(sandbox_id, cmd, cwd, background, timeout) -> dict
-    read_file(sandbox_id, path)               -> str
-    write_file(sandbox_id, path, content)
-
-    For the API server (1g):
-    new_sandbox_id()                          -> str
-    is_sandbox_running(sandbox_id)            -> bool
-    list_host_sandboxes()                     -> list[str]
-
-Errors the API server maps to HTTP codes:
-
-    ValueError     malformed sandbox ID                    -> 404
-    LookupError    no such sandbox on this host            -> 404
-    httpx.HTTPError  the guest agent didn't answer         -> 409 / 502
-
-Must run as root (it creates namespaces, cgroups and Firecracker processes).
-
-Each sandbox has two identifiers (see README section 1):
-
-    id   "sbx_<32 hex>"  its name: random, permanent, never reused
-    n    1..250          its network slot: reused after the sandbox is destroyed
-
-Layout on the host for sandbox <id> holding slot N:
-
-    /var/sbx/<id>/rootfs.ext4           this sandbox's own copy of the disk
-    /var/sbx/<id>/fc.sock               Firecracker's API socket
-    /var/sbx/<id>/firecracker.pid       Firecracker's process ID
-    /var/sbx/<id>/console.log           the VM's serial console output
-    /sys/fs/cgroup/sandboxes/<id>/      cgroup holding the Firecracker process
-    /var/sbx/state.db                   SQLite: table "slots" records which sandbox holds slot N
-    network namespace "sbx<N>"          reached from the host at 10.201.0.<N>
-
-All paths in this file are plain strings built with f-strings.
-"""
-
 from __future__ import annotations
 
 import os
@@ -109,6 +62,10 @@ HEALTH_WAIT_TIMEOUT = 30.0
 HEALTH_POLL_INTERVAL = 0.2
 PROCESS_EXIT_TIMEOUT = 5.0
 EXEC_HTTP_MARGIN = 30.0           # extra HTTP time on top of a command's own timeout
+
+
+class NoFreeSlotsError(RuntimeError):
+    """Signals that the host is full and no new sandbox can start until one is destroyed."""
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +236,7 @@ def claim_free_slot(sandbox_id: str) -> int:
                 return n
             except sqlite3.IntegrityError:
                 continue
-    raise RuntimeError(f"all {MAX_SANDBOX_NUMBER} sandbox slots are in use")
+    raise NoFreeSlotsError(f"all {MAX_SANDBOX_NUMBER} sandbox slots are in use")
 
 
 def find_slot(sandbox_id: str) -> int | None:

@@ -1,8 +1,3 @@
-"""helpers.py - the real work behind the guest agent's endpoints.
-
-guest_agent.py handles HTTP; these functions run commands and write files.
-Standard library only, like the agent itself.
-"""
 import os
 import signal
 import subprocess

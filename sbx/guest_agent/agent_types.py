@@ -1,9 +1,3 @@
-"""agent_types.py - shapes of the data the guest agent sends back.
-
-Kept separate from guest_agent.py so the API's types are in one place.
-Not named types.py: that would shadow Python's own `types` module.
-Standard library only, like the agent itself.
-"""
 from typing import TypedDict
 
 

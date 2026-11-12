@@ -1,13 +1,3 @@
-"""
-Integration test for node_agent.py (Build Plan step 1f).
-
-Boots two real Firecracker VMs, so it only runs on the host, as root:
-
-    sudo .venv/bin/python -m pytest tests/test_node_agent.py -v
-
-Skipped automatically on machines without root or /dev/kvm (laptops, CI).
-"""
-
 import os
 import subprocess
 
