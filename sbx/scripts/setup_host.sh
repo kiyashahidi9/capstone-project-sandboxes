@@ -211,4 +211,5 @@ check "python venv with dependencies"          "$VENV/bin/python" -c "import fas
 
 echo
 echo "Host ready. Start the API with:"
-echo "  sudo sbx/.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000"
+echo "  cd $(dirname "$VENV")"
+echo "  sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000"

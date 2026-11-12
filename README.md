@@ -27,6 +27,7 @@ Client / AI Agent (example_agent, client)
 - [Setup](#setup)
   - [Host on Google Cloud](#host-on-google-cloud)
   - [Connecting from your computer](#connecting-from-your-computer)
+  - [Using the client agent](#using-the-client-agent)
   - [Running the tests](#running-the-tests)
 - [Step 1F: Node agent](#step-1f-node-agent)
 - [Step 1G: API server](#step-1g-api-server)
@@ -94,7 +95,7 @@ For VS Code Remote-SSH, run `gcloud compute config-ssh` (again after each restar
 #### 4. Set up the host (on the VM)
 
 ```bash
-git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git -b 1-setup_host
+git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git
 cd capstone-project-sandboxes/sbx
 chmod +x scripts/*
 sudo scripts/setup_host.sh
@@ -109,6 +110,16 @@ This takes a few minutes. It:
 5. creates the Python environment `.venv`,
 
 and ends with a checklist. Every line should show `[x]`. It's safe to rerun. To rebuild the base image from scratch, run `sudo scripts/setup_host.sh --rebuild-rootfs`.
+
+#### 5. Start the API server (on the VM)
+
+From `sbx/`:
+
+```bash
+sudo .venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+Leave it running. Check it from a second terminal on the VM with `curl http://localhost:8000/sandboxes`, which should return `[]`. For more detail, see [Start the API server](#start-the-api-server).
 
 #### Stopping and starting the VM
 
@@ -136,17 +147,32 @@ cd sbx
 # create .venv and install the locked dependencies
 uv sync
 
-# terminal 2: forward localhost:8000 to the API on the VM
+# terminal 2: forward localhost:8000 to the API on the VM (unless VS code remote does it already)
 gcloud compute ssh sbx-node-1 --zone=us-east1-b -- -N -L 8000:localhost:8000
 
 # check the API is reachable
 curl http://localhost:8000/sandboxes
-
-# check the SDK end to end, no OpenAI key needed (prints each call and its output)
-uv run python -m sdk.smoke_test
 ```
 
-Then run the agents; see [Running the agents](#running-the-agents).
+### Using the client agent
+
+The client agent is an interactive chat. It opens one sandbox and keeps it for every task in the session. It needs the API server running on the VM, the SSH tunnel open, and `OPENAI_API_KEY` set in `.env` (see [Connecting from your computer](#connecting-from-your-computer)).
+
+Start it from `sbx/`:
+
+```bash
+uv run python -m client.client
+```
+
+When it prints `sandbox <id> ready`, type a task at the `>` prompt. The agent runs commands and edits files in the sandbox, starting from `/root`, and then prints its answer and `done`. Later tasks run in the same sandbox, so you can build on earlier work:
+
+```
+> clone https://github.com/kiyashahidi9/example-express-app and start the dev server
+> curl the health check
+> add a /time route that returns the current time, then curl it
+```
+
+Type `/quit` to exit. The sandbox is destroyed when you exit, including with Ctrl+C. For the one-shot agent and more examples, see [Running the agents](#running-the-agents).
 
 ### Running the tests
 
