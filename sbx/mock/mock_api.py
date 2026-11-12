@@ -5,9 +5,9 @@ exec/files to ONE guest agent running in Docker, so all sandboxes share one file
 here. That's fine for SDK and agent work; isolation is tested in 1f, not here.
 
 Run from sbx/ (Git Bash on Windows):
-  pip install fastapi uvicorn httpx python-dotenv
+  uv sync
   MSYS_NO_PATHCONV=1 docker run --rm -p 49983:49983 -v "$(pwd -W)/guest_agent:/app" -w /app python:3.12 python guest_agent.py
-  uvicorn mock.mock_api:app --port 8000
+  uv run uvicorn mock.mock_api:app --port 8000
 
 On Linux/macOS, drop MSYS_NO_PATHCONV=1 and use "$PWD" instead of "$(pwd -W)".
 The guest agent must run in Docker: it needs Linux (process groups, /tmp, /root).

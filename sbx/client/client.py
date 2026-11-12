@@ -1,6 +1,6 @@
 """Terminal chat: type a task, an OpenAI agent does it in a sandbox. /quit to exit.
 
-Run from sbx/: python -m client.client
+Run from sbx/: uv run python -m client.client
 """
 
 ## IMPORTS ##
