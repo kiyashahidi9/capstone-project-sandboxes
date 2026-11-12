@@ -1,3 +1,14 @@
+# Ignore everything at the top level...
+/*
+
+# ...except the sbx folder and this file
+!/sbx/
+!/.gitignore
+
+# Local SQLite databases (e.g. dev-state.db built from sbx/db/seed.sql)
+*.db
+*.db-wal
+*.db-shm
 .env
 __pycache__
 .venv
