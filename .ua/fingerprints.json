@@ -1,0 +1,2812 @@
+{
+  "version": "1.0.0",
+  "gitCommitHash": "be40aca238af650bccf31a9d2e5efb404d561bb0",
+  "generatedAt": "2026-11-12T21:10:39.021Z",
+  "files": {
+    ".env.example": {
+      "filePath": ".env.example",
+      "contentHash": "33d44a3ca90e1e249ad543ced001ca3199340770939b5c035b691248d1ae3ec1",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 10,
+      "hasStructuralAnalysis": false
+    },
+    ".githooks/prepare-commit-msg": {
+      "filePath": ".githooks/prepare-commit-msg",
+      "contentHash": "f708dc9bcba2d9f48842bd86b52abbd29fbee2e067ad3808496d5a32af315abe",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 11,
+      "hasStructuralAnalysis": false
+    },
+    ".gitignore": {
+      "filePath": ".gitignore",
+      "contentHash": "4c452a6c6e551ca73973b133d4bc018befe22d8e95941c117204d7edb6b7bfa1",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 19,
+      "hasStructuralAnalysis": false
+    },
+    "README.md": {
+      "filePath": "README.md",
+      "contentHash": "7fb58f8a0e3320e46dc0926bbd1a9bf25a85ed4226fb12d40ba7dac4d947bf51",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 958,
+      "hasStructuralAnalysis": false
+    },
+    "sbx/api/__init__.py": {
+      "filePath": "sbx/api/__init__.py",
+      "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/api/db.py": {
+      "filePath": "sbx/api/db.py",
+      "contentHash": "a6ad26b347d58729417bf727bc208607e72872bb1c8c28f71fcff9b091b2cd34",
+      "functions": [
+        {
+          "name": "connect",
+          "params": [],
+          "returnType": "sqlite3.Connection",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "make_db_folder",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "create_tables",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "now",
+          "params": [],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "to_sandbox_row",
+          "params": [
+            "row"
+          ],
+          "returnType": "SandboxRow",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "insert_sandbox",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "set_state",
+          "params": [
+            "sandbox_id",
+            "state"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "get_sandbox",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "SandboxRow | None",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "list_sandboxes",
+          "params": [],
+          "returnType": "list[SandboxRow]",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "list_live_sandboxes",
+          "params": [],
+          "returnType": "list[SandboxRow]",
+          "exported": true,
+          "lineCount": 8
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "sqlite3",
+          "specifiers": [
+            "sqlite3"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "contextlib",
+          "specifiers": [
+            "closing"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "api.models",
+          "specifiers": [
+            "SandboxRow",
+            "SandboxState"
+          ]
+        },
+        {
+          "source": "node_agent",
+          "specifiers": [
+            "db_path"
+          ]
+        }
+      ],
+      "exports": [
+        "connect",
+        "make_db_folder",
+        "create_tables",
+        "now",
+        "to_sandbox_row",
+        "insert_sandbox",
+        "set_state",
+        "get_sandbox",
+        "list_sandboxes",
+        "list_live_sandboxes"
+      ],
+      "totalLines": 115,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/api/helpers.py": {
+      "filePath": "sbx/api/helpers.py",
+      "contentHash": "cbb3271990c2e53e8f0e03585302030f33bcd531e50209601b55b8307fdc9dc5",
+      "functions": [
+        {
+          "name": "require_sandbox",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "SandboxRow",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "require_running",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "SandboxRow",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "boot_sandbox",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "node_agent.Sandbox",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "build_create_response",
+          "params": [
+            "sandbox_id",
+            "boot_seconds"
+          ],
+          "returnType": "CreateSandboxResponse",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "is_destroyed",
+          "params": [
+            "row"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "tear_down",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "guest_error_to_http",
+          "params": [
+            "error"
+          ],
+          "returnType": "HTTPException",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "run_command",
+          "params": [
+            "sandbox_id",
+            "request"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "to_execute_response",
+          "params": [
+            "result"
+          ],
+          "returnType": "ExecuteResponse",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "to_background_response",
+          "params": [
+            "result"
+          ],
+          "returnType": "ExecuteBackgroundResponse",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "fetch_file",
+          "params": [
+            "sandbox_id",
+            "path"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "text_from_body",
+          "params": [
+            "raw"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "store_file",
+          "params": [
+            "sandbox_id",
+            "path",
+            "content"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 8
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "httpx",
+          "specifiers": [
+            "httpx"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "HTTPException"
+          ]
+        },
+        {
+          "source": "node_agent",
+          "specifiers": [
+            "node_agent"
+          ]
+        },
+        {
+          "source": "api",
+          "specifiers": [
+            "db"
+          ]
+        },
+        {
+          "source": "api.models",
+          "specifiers": [
+            "CreateSandboxResponse",
+            "ExecuteRequest",
+            "ExecuteResponse",
+            "ExecuteBackgroundResponse",
+            "SandboxInfo",
+            "SandboxRow",
+            "SandboxState"
+          ]
+        }
+      ],
+      "exports": [
+        "require_sandbox",
+        "require_running",
+        "boot_sandbox",
+        "build_create_response",
+        "is_destroyed",
+        "tear_down",
+        "guest_error_to_http",
+        "run_command",
+        "to_execute_response",
+        "to_background_response",
+        "fetch_file",
+        "text_from_body",
+        "store_file"
+      ],
+      "totalLines": 167,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/api/main.py": {
+      "filePath": "sbx/api/main.py",
+      "contentHash": "0a54a1c44a2ebbe3d04d02e45c329c830b144ce609dcdf5df54be5b4b4e05809",
+      "functions": [
+        {
+          "name": "lifespan",
+          "params": [
+            "app"
+          ],
+          "returnType": "AsyncIterator[None]",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "create_sandbox",
+          "params": [],
+          "returnType": "CreateSandboxResponse",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "list_sandboxes",
+          "params": [],
+          "returnType": "SandboxListResponse",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "get_sandbox",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "SandboxInfo",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "delete_sandbox",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "dict[str, bool]",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "exec_command",
+          "params": [
+            "sandbox_id",
+            "request"
+          ],
+          "returnType": "ExecuteResponse | ExecuteBackgroundResponse",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "read_file",
+          "params": [
+            "sandbox_id",
+            "path"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "write_file",
+          "params": [
+            "sandbox_id",
+            "path",
+            "request"
+          ],
+          "returnType": "dict[str, bool]",
+          "exported": true,
+          "lineCount": 6
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "contextlib",
+          "specifiers": [
+            "asynccontextmanager"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "AsyncIterator"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "FastAPI",
+            "Request"
+          ]
+        },
+        {
+          "source": "fastapi.responses",
+          "specifiers": [
+            "PlainTextResponse"
+          ]
+        },
+        {
+          "source": "starlette.concurrency",
+          "specifiers": [
+            "run_in_threadpool"
+          ]
+        },
+        {
+          "source": "node_agent",
+          "specifiers": [
+            "node_agent"
+          ]
+        },
+        {
+          "source": "api",
+          "specifiers": [
+            "db"
+          ]
+        },
+        {
+          "source": "api.helpers",
+          "specifiers": [
+            "HTTP_CREATED",
+            "boot_sandbox",
+            "build_create_response",
+            "is_destroyed",
+            "fetch_file",
+            "require_running",
+            "require_sandbox",
+            "run_command",
+            "store_file",
+            "tear_down",
+            "text_from_body",
+            "to_background_response",
+            "to_execute_response"
+          ]
+        },
+        {
+          "source": "api.models",
+          "specifiers": [
+            "CreateSandboxResponse",
+            "ExecuteBackgroundResponse",
+            "ExecuteRequest",
+            "ExecuteResponse",
+            "SandboxInfo",
+            "SandboxListResponse",
+            "SandboxState"
+          ]
+        }
+      ],
+      "exports": [
+        "lifespan",
+        "create_sandbox",
+        "list_sandboxes",
+        "get_sandbox",
+        "delete_sandbox",
+        "exec_command",
+        "read_file",
+        "write_file"
+      ],
+      "totalLines": 119,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/api/models.py": {
+      "filePath": "sbx/api/models.py",
+      "contentHash": "a9c5e888d31eeed45fa4e2f8d0aa5c9e15e23d3a52b41cf50dabd6d99198f759",
+      "functions": [
+        {
+          "name": "ip_for_slot",
+          "params": [
+            "n"
+          ],
+          "returnType": "str | None",
+          "exported": true,
+          "lineCount": 5
+        }
+      ],
+      "classes": [
+        {
+          "name": "SandboxState",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "SandboxRow",
+          "methods": [],
+          "properties": [
+            "id",
+            "state",
+            "created_at",
+            "updated_at",
+            "n"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "SandboxInfo",
+          "methods": [
+            "from_row"
+          ],
+          "properties": [
+            "id",
+            "state",
+            "ip",
+            "created_at",
+            "updated_at"
+          ],
+          "exported": true,
+          "lineCount": 19
+        },
+        {
+          "name": "CreateSandboxResponse",
+          "methods": [],
+          "properties": [
+            "boot_seconds"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "SandboxListResponse",
+          "methods": [],
+          "properties": [
+            "sandboxes"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "ExecuteRequest",
+          "methods": [],
+          "properties": [
+            "cmd",
+            "cwd",
+            "background",
+            "timeout"
+          ],
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "ExecuteResponse",
+          "methods": [],
+          "properties": [
+            "exit_code",
+            "stdout",
+            "stderr",
+            "timed_out"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "ExecuteBackgroundResponse",
+          "methods": [],
+          "properties": [
+            "pid"
+          ],
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "imports": [
+        {
+          "source": "enum",
+          "specifiers": [
+            "StrEnum"
+          ]
+        },
+        {
+          "source": "pydantic",
+          "specifiers": [
+            "BaseModel",
+            "Field"
+          ]
+        },
+        {
+          "source": "node_agent",
+          "specifiers": [
+            "guest_ip_for"
+          ]
+        }
+      ],
+      "exports": [
+        "SandboxState",
+        "SandboxRow",
+        "SandboxInfo",
+        "ip_for_slot",
+        "CreateSandboxResponse",
+        "SandboxListResponse",
+        "ExecuteRequest",
+        "ExecuteResponse",
+        "ExecuteBackgroundResponse"
+      ],
+      "totalLines": 126,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/client/client.py": {
+      "filePath": "sbx/client/client.py",
+      "contentHash": "45a28825682e499120c3f207238e92d034512b4a879c75d4563ecd3fda46a88b",
+      "functions": [
+        {
+          "name": "run_tool",
+          "params": [
+            "sandbox",
+            "name",
+            "args"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 29
+        },
+        {
+          "name": "absolute_path",
+          "params": [
+            "path"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "main",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 50
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "posixpath",
+          "specifiers": [
+            "posixpath"
+          ]
+        },
+        {
+          "source": "dotenv",
+          "specifiers": [
+            "load_dotenv"
+          ]
+        },
+        {
+          "source": "openai",
+          "specifiers": [
+            "OpenAI"
+          ]
+        },
+        {
+          "source": "client.tools",
+          "specifiers": [
+            "build_tools"
+          ]
+        },
+        {
+          "source": "sdk.sandbox",
+          "specifiers": [
+            "Sandbox"
+          ]
+        }
+      ],
+      "exports": [
+        "run_tool",
+        "absolute_path",
+        "main"
+      ],
+      "totalLines": 123,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/client/tools.py": {
+      "filePath": "sbx/client/tools.py",
+      "contentHash": "c38b37525ac7d623cf728de8496bd6574b4af1492e8f17c5ee124220c8d683bc",
+      "functions": [
+        {
+          "name": "build_tools",
+          "params": [
+            "workdir"
+          ],
+          "returnType": "list[dict]",
+          "exported": true,
+          "lineCount": 53
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [
+        "build_tools"
+      ],
+      "totalLines": 54,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/db/schema.sql": {
+      "filePath": "sbx/db/schema.sql",
+      "contentHash": "0486d9554e156b9bcbd66059aba3d561fdbf3c852fcc59683e7bbf445d610043",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 18,
+      "hasStructuralAnalysis": false
+    },
+    "sbx/db/seed.sql": {
+      "filePath": "sbx/db/seed.sql",
+      "contentHash": "75d8cc257af9bbeb2d5e9c8a9701bc607258dddf495e58663f45fdc267e8576f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 36,
+      "hasStructuralAnalysis": false
+    },
+    "sbx/guest_agent/agent_types.py": {
+      "filePath": "sbx/guest_agent/agent_types.py",
+      "contentHash": "ee44db709ccad1e3c11fc84405421871433576f226143f632a5c91ba6dbf3fad",
+      "functions": [],
+      "classes": [
+        {
+          "name": "ExecResult",
+          "methods": [],
+          "properties": [
+            "exit_code",
+            "stdout",
+            "stderr",
+            "timed_out"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "BackgroundResult",
+          "methods": [],
+          "properties": [
+            "pid"
+          ],
+          "exported": true,
+          "lineCount": 3
+        }
+      ],
+      "imports": [
+        {
+          "source": "typing",
+          "specifiers": [
+            "TypedDict"
+          ]
+        }
+      ],
+      "exports": [
+        "ExecResult",
+        "BackgroundResult"
+      ],
+      "totalLines": 15,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/guest_agent/guest_agent.py": {
+      "filePath": "sbx/guest_agent/guest_agent.py",
+      "contentHash": "69c3e6657eee10f1ba1d2e24c85349a108e7fda33359780c1acc64f8734748fb",
+      "functions": [],
+      "classes": [
+        {
+          "name": "BadRequest",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "Handler",
+          "methods": [
+            "health",
+            "exec_",
+            "read_file",
+            "write_file",
+            "route",
+            "do_GET",
+            "do_POST",
+            "do_PUT",
+            "send",
+            "body",
+            "json_body",
+            "path_param"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 118
+        }
+      ],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "http.server",
+          "specifiers": [
+            "BaseHTTPRequestHandler",
+            "ThreadingHTTPServer"
+          ]
+        },
+        {
+          "source": "urllib.parse",
+          "specifiers": [
+            "parse_qs",
+            "urlparse"
+          ]
+        },
+        {
+          "source": "helpers",
+          "specifiers": [
+            "run_background",
+            "run_foreground",
+            "write_file_atomically"
+          ]
+        }
+      ],
+      "exports": [
+        "BadRequest",
+        "Handler"
+      ],
+      "totalLines": 169,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/guest_agent/helpers.py": {
+      "filePath": "sbx/guest_agent/helpers.py",
+      "contentHash": "1b00806a36c606cc6a4cd417a39c5d1d40a96ed3dcc3ee5e5d9ce9339da1050d",
+      "functions": [
+        {
+          "name": "run_foreground",
+          "params": [
+            "cmd",
+            "cwd",
+            "timeout"
+          ],
+          "returnType": "ExecResult",
+          "exported": true,
+          "lineCount": 40
+        },
+        {
+          "name": "run_background",
+          "params": [
+            "cmd",
+            "cwd"
+          ],
+          "returnType": "BackgroundResult",
+          "exported": true,
+          "lineCount": 33
+        },
+        {
+          "name": "write_file_atomically",
+          "params": [
+            "path",
+            "data"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 28
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "signal",
+          "specifiers": [
+            "signal"
+          ]
+        },
+        {
+          "source": "subprocess",
+          "specifiers": [
+            "subprocess"
+          ]
+        },
+        {
+          "source": "tempfile",
+          "specifiers": [
+            "tempfile"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "agent_types",
+          "specifiers": [
+            "BackgroundResult",
+            "ExecResult"
+          ]
+        }
+      ],
+      "exports": [
+        "run_foreground",
+        "run_background",
+        "write_file_atomically"
+      ],
+      "totalLines": 122,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/node_agent.py": {
+      "filePath": "sbx/node_agent.py",
+      "contentHash": "d082413d654b61f9e98130417a18d436edc16d31ac9d78c4fa4ae8cdd15b7ef8",
+      "functions": [
+        {
+          "name": "_default_fc_dir",
+          "params": [],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "new_sandbox_id",
+          "params": [],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "validate_sandbox_id",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "namespace_for",
+          "params": [
+            "n"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "guest_ip_for",
+          "params": [
+            "n"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "db_path",
+          "params": [],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "sandbox_dir",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "disk_path",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "socket_path",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "pid_file_path",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "console_log_path",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "cgroup_dir",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "wait_until",
+          "params": [
+            "condition",
+            "timeout",
+            "interval",
+            "waiting_for"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "run_script",
+          "params": [
+            "script_name"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "write_text_file",
+          "params": [
+            "path",
+            "text"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "open_db",
+          "params": [],
+          "returnType": "sqlite3.Connection",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "claim_free_slot",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "find_slot",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "int | None",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "release_slot",
+          "params": [
+            "n",
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "slot_holders",
+          "params": [],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "require_slot",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "copy_base_image",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "create_network",
+          "params": [
+            "n"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "ensure_cgroup_parent",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "create_cgroup",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "start_firecracker",
+          "params": [
+            "sandbox_id",
+            "n"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "move_into_cgroup",
+          "params": [
+            "sandbox_id",
+            "pid"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "save_pid",
+          "params": [
+            "sandbox_id",
+            "pid"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "wait_for_socket",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "firecracker_client",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "httpx.Client",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "firecracker_put",
+          "params": [
+            "client",
+            "path",
+            "body"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "set_boot_source",
+          "params": [
+            "client"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "attach_root_drive",
+          "params": [
+            "client",
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "set_machine_config",
+          "params": [
+            "client"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "attach_network",
+          "params": [
+            "client"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "start_instance",
+          "params": [
+            "client"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "configure_and_boot_vm",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "guest_agent_url",
+          "params": [
+            "sandbox_id",
+            "path"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "guest_agent_is_healthy",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "wait_for_guest_agent",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "create_sandbox",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "Sandbox",
+          "exported": true,
+          "lineCount": 34
+        },
+        {
+          "name": "load_pid",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "int | None",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "pid_still_belongs_to_sandbox",
+          "params": [
+            "pid",
+            "sandbox_id"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "wait_for_exit",
+          "params": [
+            "pid"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "kill_firecracker",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "remove_cgroup",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "delete_network",
+          "params": [
+            "n"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "remove_sandbox_dir",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "destroy_sandbox",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "is_sandbox_running",
+          "params": [
+            "sandbox_id"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "list_host_sandboxes",
+          "params": [],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "exec",
+          "params": [
+            "sandbox_id",
+            "cmd",
+            "cwd",
+            "background",
+            "timeout"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "read_file",
+          "params": [
+            "sandbox_id",
+            "path"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "write_file",
+          "params": [
+            "sandbox_id",
+            "path",
+            "content"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 8
+        }
+      ],
+      "classes": [
+        {
+          "name": "NoFreeSlotsError",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "Sandbox",
+          "methods": [],
+          "properties": [
+            "id",
+            "n",
+            "ip",
+            "pid",
+            "boot_seconds"
+          ],
+          "exported": true,
+          "lineCount": 17
+        }
+      ],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "shutil",
+          "specifiers": [
+            "shutil"
+          ]
+        },
+        {
+          "source": "signal",
+          "specifiers": [
+            "signal"
+          ]
+        },
+        {
+          "source": "sqlite3",
+          "specifiers": [
+            "sqlite3"
+          ]
+        },
+        {
+          "source": "subprocess",
+          "specifiers": [
+            "subprocess"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "uuid",
+          "specifiers": [
+            "uuid"
+          ]
+        },
+        {
+          "source": "contextlib",
+          "specifiers": [
+            "closing"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Callable"
+          ]
+        },
+        {
+          "source": "httpx",
+          "specifiers": [
+            "httpx"
+          ]
+        },
+        {
+          "source": "pydantic",
+          "specifiers": [
+            "BaseModel"
+          ]
+        }
+      ],
+      "exports": [
+        "_default_fc_dir",
+        "NoFreeSlotsError",
+        "Sandbox",
+        "new_sandbox_id",
+        "validate_sandbox_id",
+        "namespace_for",
+        "guest_ip_for",
+        "db_path",
+        "sandbox_dir",
+        "disk_path",
+        "socket_path",
+        "pid_file_path",
+        "console_log_path",
+        "cgroup_dir",
+        "wait_until",
+        "run_script",
+        "write_text_file",
+        "open_db",
+        "claim_free_slot",
+        "find_slot",
+        "release_slot",
+        "slot_holders",
+        "require_slot",
+        "copy_base_image",
+        "create_network",
+        "ensure_cgroup_parent",
+        "create_cgroup",
+        "start_firecracker",
+        "move_into_cgroup",
+        "save_pid",
+        "wait_for_socket",
+        "firecracker_client",
+        "firecracker_put",
+        "set_boot_source",
+        "attach_root_drive",
+        "set_machine_config",
+        "attach_network",
+        "start_instance",
+        "configure_and_boot_vm",
+        "guest_agent_url",
+        "guest_agent_is_healthy",
+        "wait_for_guest_agent",
+        "create_sandbox",
+        "load_pid",
+        "pid_still_belongs_to_sandbox",
+        "wait_for_exit",
+        "kill_firecracker",
+        "remove_cgroup",
+        "delete_network",
+        "remove_sandbox_dir",
+        "destroy_sandbox",
+        "is_sandbox_running",
+        "list_host_sandboxes",
+        "exec",
+        "read_file",
+        "write_file"
+      ],
+      "totalLines": 630,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/pyproject.toml": {
+      "filePath": "sbx/pyproject.toml",
+      "contentHash": "8d7cd535ff78d2da0b484f3b74723a68c95d06450cfc84e9f5b82ed68c4fa3ce",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 23,
+      "hasStructuralAnalysis": false
+    },
+    "sbx/scripts/install_guest_agent.sh": {
+      "filePath": "sbx/scripts/install_guest_agent.sh",
+      "contentHash": "cca58bd22b07557c0ead39f473b2beacd0b0bc3538a4699a097c381474a33ab1",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 239,
+      "hasStructuralAnalysis": false
+    },
+    "sbx/scripts/netns.sh": {
+      "filePath": "sbx/scripts/netns.sh",
+      "contentHash": "2bee8f0fcfc1e46910a44eb92ef04a292975f4b1f09687057a0cc7d8351b85d0",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 345,
+      "hasStructuralAnalysis": false
+    },
+    "sbx/scripts/netns_create.sh": {
+      "filePath": "sbx/scripts/netns_create.sh",
+      "contentHash": "c37e992e92ca3732858a29eb1d4cba55e943135f3272e22c69f35fb552fced20",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 44,
+      "hasStructuralAnalysis": false
+    },
+    "sbx/scripts/netns_delete.sh": {
+      "filePath": "sbx/scripts/netns_delete.sh",
+      "contentHash": "3de23c9141b98ce3b09b4b4d011c13038d697fa5315510d7a044a33201975d1b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 32,
+      "hasStructuralAnalysis": false
+    },
+    "sbx/scripts/setup_host.sh": {
+      "filePath": "sbx/scripts/setup_host.sh",
+      "contentHash": "d1c92aa34063e0d02494f2267033b71ba98daf46a3aa49ead6155b3ffd635a93",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 216,
+      "hasStructuralAnalysis": false
+    },
+    "sbx/sdk/sandbox.py": {
+      "filePath": "sbx/sdk/sandbox.py",
+      "contentHash": "bb75094653352305175c22d743642dc5fc9eab8432363ff56976ae3551b119ae",
+      "functions": [
+        {
+          "name": "_call_api",
+          "params": [
+            "method",
+            "url",
+            "timeout",
+            "**kwargs"
+          ],
+          "returnType": "httpx.Response",
+          "exported": true,
+          "lineCount": 34
+        }
+      ],
+      "classes": [
+        {
+          "name": "SandboxError",
+          "methods": [
+            "__init__"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "Sandbox",
+          "methods": [
+            "__init__",
+            "__repr__",
+            "create",
+            "exec",
+            "read_file",
+            "write_file",
+            "destroy"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 152
+        }
+      ],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "httpx",
+          "specifiers": [
+            "httpx"
+          ]
+        },
+        {
+          "source": "dotenv",
+          "specifiers": [
+            "load_dotenv"
+          ]
+        }
+      ],
+      "exports": [
+        "SandboxError",
+        "_call_api",
+        "Sandbox"
+      ],
+      "totalLines": 217,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/tests/acceptance_agent.md": {
+      "filePath": "sbx/tests/acceptance_agent.md",
+      "contentHash": "09ab2543b2514daed1b2c4498408f2aaa30f3d0d83d6cac5148423fc59909b0b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 146,
+      "hasStructuralAnalysis": false
+    },
+    "sbx/tests/test_api.py": {
+      "filePath": "sbx/tests/test_api.py",
+      "contentHash": "465e0614e28f0b3482d2cfc9f883b63a111dfbeb8089b03a2c5f4230cb15dc5d",
+      "functions": [
+        {
+          "name": "client",
+          "params": [
+            "tmp_path",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "remember_slot",
+          "params": [
+            "sandbox_id",
+            "n"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "test_create_returns_a_running_sandbox",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "test_two_creates_get_different_ids",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "test_failed_boot_marks_the_row_destroyed",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "test_full_host_answers_503_and_marks_the_row_destroyed",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "boot_into_slot",
+          "params": [
+            "sandbox_id",
+            "n"
+          ],
+          "returnType": "node_agent.Sandbox",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "test_list_is_empty_before_any_sandbox",
+          "params": [
+            "client"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_list_shows_a_running_sandbox",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "test_list_keeps_destroyed_rows_oldest_first",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 31
+        },
+        {
+          "name": "test_get_returns_one_running_sandbox",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "test_get_unknown_id_is_not_found",
+          "params": [
+            "client"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_get_destroyed_sandbox_is_still_found",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "fake_destroy",
+          "params": [
+            "calls"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "test_delete_tears_down_a_running_sandbox_once",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "test_delete_unknown_id_is_not_found",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "test_delete_skips_a_sandbox_that_is_already_destroyed",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "test_delete_tears_down_a_sandbox_that_is_still_starting",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "make_running_sandbox",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "scripted_exec",
+          "params": [
+            "calls",
+            "result"
+          ],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "guest_http_error",
+          "params": [
+            "status",
+            "message"
+          ],
+          "returnType": "httpx.HTTPStatusError",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_exec_returns_a_finished_command",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 26
+        },
+        {
+          "name": "test_exec_returns_a_pid_for_a_background_command",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "test_exec_reports_a_command_timeout_in_the_body",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "test_exec_unknown_id_is_not_found",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "test_exec_rejects_a_sandbox_that_is_not_running",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "test_exec_rejects_a_request_that_breaks_the_type",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "test_exec_passes_a_guest_client_error_through",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "test_exec_turns_a_dead_guest_into_bad_gateway",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "test_write_then_read_round_trips_the_file",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "test_write_replaces_the_old_text",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "test_read_missing_file_is_not_found",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "test_files_unknown_sandbox_is_not_found",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "test_files_reject_a_sandbox_that_is_not_running",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 26
+        },
+        {
+          "name": "test_files_require_a_path",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "test_write_passes_a_guest_client_error_through",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "test_read_turns_a_dead_guest_into_bad_gateway",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "test_write_rejects_bytes_that_are_not_text",
+          "params": [
+            "client",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 14
+        }
+      ],
+      "classes": [
+        {
+          "name": "MemoryFiles",
+          "methods": [
+            "__init__",
+            "read",
+            "write"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 14
+        }
+      ],
+      "imports": [
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "contextlib",
+          "specifiers": [
+            "closing"
+          ]
+        },
+        {
+          "source": "httpx",
+          "specifiers": [
+            "httpx"
+          ]
+        },
+        {
+          "source": "pytest",
+          "specifiers": [
+            "pytest"
+          ]
+        },
+        {
+          "source": "fastapi.testclient",
+          "specifiers": [
+            "TestClient"
+          ]
+        },
+        {
+          "source": "node_agent",
+          "specifiers": [
+            "node_agent"
+          ]
+        },
+        {
+          "source": "api",
+          "specifiers": [
+            "db"
+          ]
+        },
+        {
+          "source": "api.main",
+          "specifiers": [
+            "app"
+          ]
+        },
+        {
+          "source": "api.models",
+          "specifiers": [
+            "CreateSandboxResponse",
+            "SandboxState"
+          ]
+        }
+      ],
+      "exports": [
+        "client",
+        "remember_slot",
+        "test_create_returns_a_running_sandbox",
+        "test_two_creates_get_different_ids",
+        "test_failed_boot_marks_the_row_destroyed",
+        "test_full_host_answers_503_and_marks_the_row_destroyed",
+        "boot_into_slot",
+        "test_list_is_empty_before_any_sandbox",
+        "test_list_shows_a_running_sandbox",
+        "test_list_keeps_destroyed_rows_oldest_first",
+        "test_get_returns_one_running_sandbox",
+        "test_get_unknown_id_is_not_found",
+        "test_get_destroyed_sandbox_is_still_found",
+        "fake_destroy",
+        "test_delete_tears_down_a_running_sandbox_once",
+        "test_delete_unknown_id_is_not_found",
+        "test_delete_skips_a_sandbox_that_is_already_destroyed",
+        "test_delete_tears_down_a_sandbox_that_is_still_starting",
+        "make_running_sandbox",
+        "scripted_exec",
+        "guest_http_error",
+        "test_exec_returns_a_finished_command",
+        "test_exec_returns_a_pid_for_a_background_command",
+        "test_exec_reports_a_command_timeout_in_the_body",
+        "test_exec_unknown_id_is_not_found",
+        "test_exec_rejects_a_sandbox_that_is_not_running",
+        "test_exec_rejects_a_request_that_breaks_the_type",
+        "test_exec_passes_a_guest_client_error_through",
+        "test_exec_turns_a_dead_guest_into_bad_gateway",
+        "MemoryFiles",
+        "test_write_then_read_round_trips_the_file",
+        "test_write_replaces_the_old_text",
+        "test_read_missing_file_is_not_found",
+        "test_files_unknown_sandbox_is_not_found",
+        "test_files_reject_a_sandbox_that_is_not_running",
+        "test_files_require_a_path",
+        "test_write_passes_a_guest_client_error_through",
+        "test_read_turns_a_dead_guest_into_bad_gateway",
+        "test_write_rejects_bytes_that_are_not_text"
+      ],
+      "totalLines": 643,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/tests/test_db.py": {
+      "filePath": "sbx/tests/test_db.py",
+      "contentHash": "cf8ea63f36a39531853f3e476e61f721e0e327a8f538469500cce021337567ae",
+      "functions": [
+        {
+          "name": "temp_db",
+          "params": [
+            "tmp_path",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "clock",
+          "params": [
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "claim_slot",
+          "params": [
+            "n",
+            "sandbox_id"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "slots_table_sql",
+          "params": [
+            "schema_sql"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "test_schema_file_matches_node_agent_slots_schema",
+          "params": [],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "test_create_tables_is_safe_to_run_twice",
+          "params": [],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "test_connections_use_wal_mode",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "test_insert_starts_in_starting_with_matching_times",
+          "params": [
+            "clock"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_insert_twice_is_rejected",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "test_set_state_changes_state_and_updated_at_only",
+          "params": [
+            "clock"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "test_set_state_on_unknown_sandbox_returns_false",
+          "params": [],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "test_get_unknown_sandbox_returns_none",
+          "params": [],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "test_get_fills_slot_number_or_none",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "test_list_returns_every_sandbox_oldest_first_with_slots",
+          "params": [
+            "clock"
+          ],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "test_list_live_skips_destroyed",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_lists_are_empty_on_fresh_database",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "sqlite3",
+          "specifiers": [
+            "sqlite3"
+          ]
+        },
+        {
+          "source": "contextlib",
+          "specifiers": [
+            "closing"
+          ]
+        },
+        {
+          "source": "pytest",
+          "specifiers": [
+            "pytest"
+          ]
+        },
+        {
+          "source": "node_agent",
+          "specifiers": [
+            "node_agent"
+          ]
+        },
+        {
+          "source": "api",
+          "specifiers": [
+            "db"
+          ]
+        },
+        {
+          "source": "api.models",
+          "specifiers": [
+            "SandboxState"
+          ]
+        }
+      ],
+      "exports": [
+        "temp_db",
+        "clock",
+        "claim_slot",
+        "slots_table_sql",
+        "test_schema_file_matches_node_agent_slots_schema",
+        "test_create_tables_is_safe_to_run_twice",
+        "test_connections_use_wal_mode",
+        "test_insert_starts_in_starting_with_matching_times",
+        "test_insert_twice_is_rejected",
+        "test_set_state_changes_state_and_updated_at_only",
+        "test_set_state_on_unknown_sandbox_returns_false",
+        "test_get_unknown_sandbox_returns_none",
+        "test_get_fills_slot_number_or_none",
+        "test_list_returns_every_sandbox_oldest_first_with_slots",
+        "test_list_live_skips_destroyed",
+        "test_lists_are_empty_on_fresh_database"
+      ],
+      "totalLines": 127,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/tests/test_node_agent.py": {
+      "filePath": "sbx/tests/test_node_agent.py",
+      "contentHash": "d995434f59227ad7061e69a7ff190a964505c29139d6ad743a132494342a4753",
+      "functions": [
+        {
+          "name": "test_two_sandboxes_run_commands_and_are_isolated",
+          "params": [],
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "test_slot_is_reused_under_a_new_id",
+          "params": [],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "test_api_server_helpers",
+          "params": [],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "test_nothing_is_left_behind",
+          "params": [],
+          "exported": true,
+          "lineCount": 24
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "subprocess",
+          "specifiers": [
+            "subprocess"
+          ]
+        },
+        {
+          "source": "pytest",
+          "specifiers": [
+            "pytest"
+          ]
+        },
+        {
+          "source": "node_agent",
+          "specifiers": [
+            "node_agent"
+          ]
+        },
+        {
+          "source": "node_agent",
+          "specifiers": [
+            "create_sandbox",
+            "destroy_sandbox",
+            "exec",
+            "is_sandbox_running",
+            "list_host_sandboxes",
+            "new_sandbox_id",
+            "read_file",
+            "write_file"
+          ]
+        }
+      ],
+      "exports": [
+        "test_two_sandboxes_run_commands_and_are_isolated",
+        "test_slot_is_reused_under_a_new_id",
+        "test_api_server_helpers",
+        "test_nothing_is_left_behind"
+      ],
+      "totalLines": 93,
+      "hasStructuralAnalysis": true
+    },
+    "sbx/tests/test_node_agent_helpers.py": {
+      "filePath": "sbx/tests/test_node_agent_helpers.py",
+      "contentHash": "5accd85e285e643b53c413f78f312234550291a3e1cf0a397fd5dac47c3d3ef1",
+      "functions": [
+        {
+          "name": "test_new_ids_are_valid_and_unique",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_names_built_from_slot_number",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "test_validate_rejects_bad_ids",
+          "params": [
+            "bad_id"
+          ],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "fake_sandboxes_root",
+          "params": [
+            "tmp_path",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "insert_slot",
+          "params": [
+            "n",
+            "sandbox_id"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "test_claims_lowest_free_slot",
+          "params": [
+            "fake_sandboxes_root"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "test_raises_when_all_slots_taken",
+          "params": [
+            "fake_sandboxes_root",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "test_a_sandbox_cannot_hold_two_slots",
+          "params": [
+            "fake_sandboxes_root"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "test_concurrent_claims_never_share_a_slot",
+          "params": [
+            "fake_sandboxes_root"
+          ],
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "test_find_slot",
+          "params": [
+            "fake_sandboxes_root"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_freed_slot_is_reused_under_a_new_id",
+          "params": [
+            "fake_sandboxes_root"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "test_release_does_not_free_another_sandboxes_slot",
+          "params": [
+            "fake_sandboxes_root"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_require_slot_raises_lookup_error_for_unknown_sandbox",
+          "params": [
+            "fake_sandboxes_root"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_guest_agent_url",
+          "params": [
+            "fake_sandboxes_root"
+          ],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "test_pid_round_trip",
+          "params": [
+            "fake_sandboxes_root"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_stale_pid_is_not_ours",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "test_wait_until_times_out",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "test_create_sandbox_cleans_up_when_a_step_fails",
+          "params": [
+            "fake_sandboxes_root",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "test_create_sandbox_uses_the_id_it_is_given",
+          "params": [
+            "fake_sandboxes_root",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "test_create_sandbox_rejects_bad_or_reused_ids",
+          "params": [
+            "fake_sandboxes_root",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "test_destroy_frees_slot_only_after_network_is_deleted",
+          "params": [
+            "fake_sandboxes_root",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "test_destroy_keeps_the_slot_if_network_delete_fails",
+          "params": [
+            "fake_sandboxes_root",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "test_destroy_without_a_slot_skips_network",
+          "params": [
+            "fake_sandboxes_root",
+            "monkeypatch"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "test_is_sandbox_running_without_a_pid",
+          "params": [
+            "fake_sandboxes_root"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "test_is_sandbox_running_rejects_bad_ids",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "test_list_host_sandboxes",
+          "params": [
+            "fake_sandboxes_root"
+          ],
+          "exported": true,
+          "lineCount": 6
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "sqlite3",
+          "specifiers": [
+            "sqlite3"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "contextlib",
+          "specifiers": [
+            "closing"
+          ]
+        },
+        {
+          "source": "pytest",
+          "specifiers": [
+            "pytest"
+          ]
+        },
+        {
+          "source": "node_agent",
+          "specifiers": [
+            "node_agent"
+          ]
+        }
+      ],
+      "exports": [
+        "test_new_ids_are_valid_and_unique",
+        "test_names_built_from_slot_number",
+        "test_validate_rejects_bad_ids",
+        "fake_sandboxes_root",
+        "insert_slot",
+        "test_claims_lowest_free_slot",
+        "test_raises_when_all_slots_taken",
+        "test_a_sandbox_cannot_hold_two_slots",
+        "test_concurrent_claims_never_share_a_slot",
+        "test_find_slot",
+        "test_freed_slot_is_reused_under_a_new_id",
+        "test_release_does_not_free_another_sandboxes_slot",
+        "test_require_slot_raises_lookup_error_for_unknown_sandbox",
+        "test_guest_agent_url",
+        "test_pid_round_trip",
+        "test_stale_pid_is_not_ours",
+        "test_wait_until_times_out",
+        "test_create_sandbox_cleans_up_when_a_step_fails",
+        "test_create_sandbox_uses_the_id_it_is_given",
+        "test_create_sandbox_rejects_bad_or_reused_ids",
+        "test_destroy_frees_slot_only_after_network_is_deleted",
+        "test_destroy_keeps_the_slot_if_network_delete_fails",
+        "test_destroy_without_a_slot_skips_network",
+        "test_is_sandbox_running_without_a_pid",
+        "test_is_sandbox_running_rejects_bad_ids",
+        "test_list_host_sandboxes"
+      ],
+      "totalLines": 261,
+      "hasStructuralAnalysis": true
+    }
+  }
+}
