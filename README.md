@@ -21,18 +21,12 @@ Client / AI Agent (example_agent, client)
     Guest Agent (guest_agent/)
 ```
 
-Locally, a mock API and a Docker container stand in for the real Firecracker VMs:
-
-```text
-example_agent → sdk → mock API (:8000) → guest agent in Docker (:49983)
-```
-
 ## Contents
 
 - [Repository layout](#repository-layout)
 - [Setup](#setup)
   - [Host on Google Cloud](#host-on-google-cloud)
-  - [Local development](#local-development)
+  - [Connecting from your computer](#connecting-from-your-computer)
   - [Running the tests](#running-the-tests)
 - [Step 1F: Node agent](#step-1f-node-agent)
 - [Step 1G: API server](#step-1g-api-server)
@@ -56,7 +50,6 @@ sbx/
   sdk/             Python SDK + smoke test                               (1H/I)
   client/          interactive chat agent (one sandbox across tasks)     (1H/I)
   example_agent/   one-shot OpenAI coding agent                          (1H/I)
-  mock/            mock sandbox API                                      (1H/I)
   tests/           pytest suite
 ```
 
@@ -126,12 +119,15 @@ gcloud compute instances start sbx-node-1 --zone=us-east1-b
 
 Stopping ends every running sandbox. After starting, start the API server again (see [Start the API server](#start-the-api-server)).
 
-### Local development
+### Connecting from your computer
+
+The SDK and agents talk to the API server running on the GCP VM (see [Start the API server](#start-the-api-server)). Reach it through an SSH tunnel.
 
 ```bash
 # install uv if you don't have it: https://docs.astral.sh/uv/getting-started/installation/
 
 # set up env vars (at the repo root), then fill in OPENAI_API_KEY in .env
+# SANDBOX_API defaults to http://localhost:8000, the local end of the tunnel
 cp .env.example .env
 
 # run every command below from sbx/
@@ -140,11 +136,11 @@ cd sbx
 # create .venv and install the locked dependencies
 uv sync
 
-# terminal 2: start the mock API (fake sandboxes, forwards to the guest agent)
-uv run uvicorn mock.mock_api:app --port 8000
+# terminal 2: forward localhost:8000 to the API on the VM
+gcloud compute ssh sbx-node-1 --zone=us-east1-b -- -N -L 8000:localhost:8000
 
-# terminal 3: check the guest agent is up -> {"ok": true}
-curl http://localhost:49983/health
+# check the API is reachable
+curl http://localhost:8000/sandboxes
 
 # check the SDK end to end, no OpenAI key needed (prints each call and its output)
 uv run python -m sdk.smoke_test
@@ -850,7 +846,7 @@ Pytest prints one warning: Starlette's test client still imports the `httpx` pac
 
 ## Steps 1H/I: SDK and example agents
 
-An example coding agent that uses OpenAI to complete tasks inside a sandbox, through the Python SDK in `sdk/`. For setup, see [Local development](#local-development).
+An example coding agent that uses OpenAI to complete tasks inside a sandbox, through the Python SDK in `sdk/`. For setup, see [Connecting from your computer](#connecting-from-your-computer).
 
 ### Running the agents
 
