@@ -1,0 +1,10 @@
+# Host: node agent + API server
+fastapi
+uvicorn
+httpx
+pydantic
+# Client: SDK + terminal chat
+openai
+python-dotenv
+# Tests
+pytest
