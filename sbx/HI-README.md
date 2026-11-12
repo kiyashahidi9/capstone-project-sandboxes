@@ -81,3 +81,29 @@ sandbox sb1 ready
 > make the time return in EST
 > /quit
 ```
+
+## Telling the agent where it works
+
+The sandbox doesn't tell the agent which directory it's in. The client app has to say so, either in the system prompt or in the tool descriptions. If it doesn't, the agent loses track of its own files.
+
+Commands run in `/root` by default, so relative paths work in `run_command`. The guest agent's file endpoints, though, only accept absolute paths. An agent that doesn't know about `/root` guesses one. In testing, the agent cloned `example-express-app` into `/root` and then kept trying to read `/sandbox/example-express-app/index.js`, which got a 404. Its relative-path attempts got a 400 because they weren't absolute. It gave up without ever finding the file.
+
+The client (`client/client.py`) handles this with a single `WORKDIR` setting, used in three places:
+
+- `build_tools(WORKDIR)` (`client/tools.py`) puts the working directory in each tool's description.
+- `run_command` runs with `cwd=WORKDIR`, so commands run where the descriptions say they do.
+- `absolute_path()` joins relative `read_file`/`write_file` paths onto `WORKDIR`.
+
+Any other client should do the same. Tell the model the working directory, through the system prompt, the tool descriptions (`client/tools.py`), or both. Make sure the directory it's told about is the one commands actually run in. If you change `WORKDIR`, that folder must already exist in the VM, or `exec` returns a 400.
+
+### Tradeoffs (for the case study)
+
+| Approach | Pro | Con |
+|---|---|---|
+| System prompt | One sentence; the model sees it from the start | Easy to drift from the real `cwd`; every client must remember to add it |
+| Tool description | The rule sits on the tool, right where the model picks a path | Repeated in every tool schema; still only guidance |
+| Client resolves relative paths | No model cooperation needed | Can't fix a made-up absolute path like `/sandbox/...` |
+| Tool results report `cwd` / errors name it | Agent recovers from its own mistakes | Only helps after a failed call |
+| Absolute-paths-only API (current) | Unambiguous on the server side | Pushes the problem onto every client |
+
+Our choice: tool descriptions plus client-side resolution, both driven by one `WORKDIR`. The system prompt stays generic. A system-prompt line and better error messages are cheap additions if agents still guess wrong.

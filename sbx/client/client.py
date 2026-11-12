@@ -6,11 +6,12 @@ Run from sbx/: uv run python -m client.client
 ## IMPORTS ##
 
 import json
+import posixpath
 
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from client.tools import TOOLS
+from client.tools import build_tools
 from sdk.sandbox import Sandbox
 
 ## CONFIG ##
@@ -21,6 +22,9 @@ client = OpenAI()
 
 MODEL = "gpt-4.1"
 MAX_STEPS = 50      # most model calls per task, so a confused agent can't loop forever
+
+WORKDIR = "/root"   # where commands run and relative file paths point; must exist in the VM
+TOOLS = build_tools(WORKDIR)   # the tool descriptions tell the model about WORKDIR
 
 SYSTEM_PROMPT = (
     "You are a coding agent working in a Linux sandbox. "
@@ -41,7 +45,7 @@ def run_tool(sandbox: Sandbox, name: str, args: dict) -> str:
         background = args.get("background", False)
         print(f"[run] {args['cmd']}" + ("   (background)" if background else ""))
 
-        result = sandbox.exec(args["cmd"], background=background)
+        result = sandbox.exec(args["cmd"], cwd=WORKDIR, background=background)
 
         # show the first few lines of output
         output = result.get("stdout", "") + result.get("stderr", "")
@@ -50,14 +54,21 @@ def run_tool(sandbox: Sandbox, name: str, args: dict) -> str:
 
         return json.dumps(result)
 
+    path = absolute_path(args["path"])
+
     if name == "read_file":
-        print(f"[read] {args['path']}")
-        return sandbox.read_file(args["path"])
+        print(f"[read] {path}")
+        return sandbox.read_file(path)
 
     # otherwise it's write_file
-    print(f"[write] {args['path']}")
-    sandbox.write_file(args["path"], args["content"])
+    print(f"[write] {path}")
+    sandbox.write_file(path, args["content"])
     return "ok"
+
+
+def absolute_path(path: str) -> str:
+    """Turns a path relative to WORKDIR into an absolute one; absolute paths pass through."""
+    return posixpath.join(WORKDIR, path)
 
 
 ## CHAT LOOP ##
