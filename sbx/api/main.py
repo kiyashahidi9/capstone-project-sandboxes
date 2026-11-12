@@ -7,6 +7,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
+from starlette.concurrency import run_in_threadpool
 
 import node_agent
 from api import db
@@ -15,10 +16,13 @@ from api.helpers import (
     boot_sandbox,
     build_create_response,
     is_destroyed,
+    fetch_file,
     require_running,
     require_sandbox,
     run_command,
+    store_file,
     tear_down,
+    text_from_body,
     to_background_response,
     to_execute_response,
 )
@@ -103,14 +107,14 @@ def exec_command(sandbox_id: str, request: ExecuteRequest) -> ExecuteResponse | 
 @app.get("/sandboxes/{sandbox_id}/files", response_class=PlainTextResponse)
 def read_file(sandbox_id: str, path: str) -> str:
     """Sends the client a file's contents from inside the sandbox as plain text."""
-    ...  # DECISION: raw text like the guest agent; require_running(...) then fetch_file(...)
+    require_running(sandbox_id)
+    return fetch_file(sandbox_id, path)
 
 
 @app.put("/sandboxes/{sandbox_id}/files")
 async def write_file(sandbox_id: str, path: str, request: Request) -> dict[str, bool]:
     """Saves the uploaded text to a file inside the sandbox."""
-    # async only to await request.body(); blocking work goes through the thread pool:
-    # content = (await request.body()).decode()
-    # await run_in_threadpool(store_file, sandbox_id, path, content)
-    # return {"ok": True}
-    ...
+    require_running(sandbox_id)
+    content = text_from_body(await request.body())
+    await run_in_threadpool(store_file, sandbox_id, path, content)
+    return {"ok": True}

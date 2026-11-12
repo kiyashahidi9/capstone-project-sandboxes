@@ -449,3 +449,182 @@ def test_exec_turns_a_dead_guest_into_bad_gateway(client, monkeypatch):
 
     assert response.status_code == 502
     assert response.json() == {"detail": "Guest agent failed"}
+
+
+class MemoryFiles:
+    """A stand-in for the files inside one sandbox."""
+
+    def __init__(self) -> None:
+        self.saved: dict[tuple[str, str], str] = {}
+
+    def read(self, sandbox_id: str, path: str) -> str:
+        try:
+            return self.saved[(sandbox_id, path)]
+        except KeyError as error:
+            raise FileNotFoundError(path) from error
+
+    def write(self, sandbox_id: str, path: str, content: str) -> None:
+        self.saved[(sandbox_id, path)] = content
+
+
+def test_write_then_read_round_trips_the_file(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    files = MemoryFiles()
+    monkeypatch.setattr(node_agent, "read_file", files.read)
+    monkeypatch.setattr(node_agent, "write_file", files.write)
+
+    written = client.put(
+        f"/sandboxes/{sandbox_id}/files",
+        params={"path": "/tmp/hello.txt"},
+        content="Hello from FastAPI",
+        headers={"Content-Type": "text/plain"},
+    )
+    read = client.get(
+        f"/sandboxes/{sandbox_id}/files",
+        params={"path": "/tmp/hello.txt"},
+    )
+
+    assert written.status_code == 200
+    assert written.json() == {"ok": True}
+    assert read.status_code == 200
+    assert read.text == "Hello from FastAPI"
+    assert read.headers["content-type"].startswith("text/plain")
+
+
+def test_write_replaces_the_old_text(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    files = MemoryFiles()
+    monkeypatch.setattr(node_agent, "read_file", files.read)
+    monkeypatch.setattr(node_agent, "write_file", files.write)
+    url = f"/sandboxes/{sandbox_id}/files"
+    client.put(url, params={"path": "/tmp/hello.txt"}, content="first")
+    client.put(url, params={"path": "/tmp/hello.txt"}, content="second")
+
+    read = client.get(url, params={"path": "/tmp/hello.txt"})
+
+    assert read.status_code == 200
+    assert read.text == "second"
+
+
+def test_read_missing_file_is_not_found(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    files = MemoryFiles()
+    monkeypatch.setattr(node_agent, "read_file", files.read)
+
+    response = client.get(
+        f"/sandboxes/{sandbox_id}/files",
+        params={"path": "/tmp/missing.txt"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "no such file: /tmp/missing.txt"}
+
+
+def test_files_unknown_sandbox_is_not_found(client, monkeypatch):
+    files = MemoryFiles()
+    monkeypatch.setattr(node_agent, "read_file", files.read)
+    monkeypatch.setattr(node_agent, "write_file", files.write)
+
+    read = client.get("/sandboxes/unknown/files", params={"path": "/tmp/hello.txt"})
+    write = client.put(
+        "/sandboxes/unknown/files",
+        params={"path": "/tmp/hello.txt"},
+        content="hello",
+    )
+
+    assert read.status_code == 404
+    assert write.status_code == 404
+    assert read.json() == {"detail": "Sandbox not found"}
+    assert write.json() == {"detail": "Sandbox not found"}
+    assert files.saved == {}
+
+
+def test_files_reject_a_sandbox_that_is_not_running(client, monkeypatch):
+    files = MemoryFiles()
+    monkeypatch.setattr(node_agent, "read_file", files.read)
+    monkeypatch.setattr(node_agent, "write_file", files.write)
+    starting_id = "sbx_" + "b" * 32
+    db.insert_sandbox(starting_id)
+
+    def boom(sandbox_id: str | None = None) -> node_agent.Sandbox:
+        raise RuntimeError("boot failed")
+
+    monkeypatch.setattr(node_agent, "create_sandbox", boom)
+    client.post("/sandboxes")
+    destroyed_id = next(row.id for row in db.list_sandboxes() if row.state == SandboxState.DESTROYED)
+
+    for sandbox_id in (starting_id, destroyed_id):
+        read = client.get(f"/sandboxes/{sandbox_id}/files", params={"path": "/tmp/hello.txt"})
+        write = client.put(
+            f"/sandboxes/{sandbox_id}/files",
+            params={"path": "/tmp/hello.txt"},
+            content="hello",
+        )
+        assert read.status_code == 409
+        assert write.status_code == 409
+        assert read.json() == {"detail": "Sandbox is not running"}
+        assert write.json() == {"detail": "Sandbox is not running"}
+    assert files.saved == {}
+
+
+def test_files_require_a_path(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    files = MemoryFiles()
+    monkeypatch.setattr(node_agent, "read_file", files.read)
+    monkeypatch.setattr(node_agent, "write_file", files.write)
+
+    read = client.get(f"/sandboxes/{sandbox_id}/files")
+    write = client.put(f"/sandboxes/{sandbox_id}/files", content="hello")
+
+    assert read.status_code == 422
+    assert write.status_code == 422
+    assert files.saved == {}
+
+
+def test_write_passes_a_guest_client_error_through(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+
+    def reject(*args, **kwargs):
+        raise guest_http_error(400, "?path= must be an absolute path")
+
+    monkeypatch.setattr(node_agent, "write_file", reject)
+    response = client.put(
+        f"/sandboxes/{sandbox_id}/files",
+        params={"path": "tmp/hello.txt"},
+        content="hello",
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "?path= must be an absolute path"}
+
+
+def test_read_turns_a_dead_guest_into_bad_gateway(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+
+    def down(*args, **kwargs):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(node_agent, "read_file", down)
+    response = client.get(
+        f"/sandboxes/{sandbox_id}/files",
+        params={"path": "/tmp/hello.txt"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Guest agent failed"}
+
+
+def test_write_rejects_bytes_that_are_not_text(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    files = MemoryFiles()
+    monkeypatch.setattr(node_agent, "write_file", files.write)
+
+    response = client.put(
+        f"/sandboxes/{sandbox_id}/files",
+        params={"path": "/tmp/hello.txt"},
+        content=b"\xff",
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "File body must be text"}
+    assert files.saved == {}

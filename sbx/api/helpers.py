@@ -136,9 +136,29 @@ def to_background_response(result: dict) -> ExecuteBackgroundResponse:
 
 def fetch_file(sandbox_id: str, path: str) -> str:
     """Reads a file from inside the sandbox, or answers 404 if it isn't there."""
-    ...  # FileNotFoundError -> HTTPException(HTTP_NOT_FOUND)
+    try:
+        return node_agent.read_file(sandbox_id, path)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=HTTP_NOT_FOUND, detail=f"no such file: {path}") from error
+    except httpx.HTTPStatusError as error:
+        raise guest_error_to_http(error) from error
+    except httpx.RequestError as error:
+        raise HTTPException(status_code=HTTP_BAD_GATEWAY, detail="Guest agent failed") from error
+
+
+def text_from_body(raw: bytes) -> str:
+    """Reads an uploaded file as text, or answers 400 if the bytes are not text."""
+    try:
+        return raw.decode()
+    except UnicodeDecodeError as error:
+        raise HTTPException(status_code=400, detail="File body must be text") from error
 
 
 def store_file(sandbox_id: str, path: str, content: str) -> None:
     """Saves text to a file inside a running sandbox."""
-    ...  # require_running(...) then node_agent.write_file(...)
+    try:
+        node_agent.write_file(sandbox_id, path, content)
+    except httpx.HTTPStatusError as error:
+        raise guest_error_to_http(error) from error
+    except httpx.RequestError as error:
+        raise HTTPException(status_code=HTTP_BAD_GATEWAY, detail="Guest agent failed") from error
