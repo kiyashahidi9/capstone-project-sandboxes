@@ -27,3 +27,7 @@ uv run pytest tests/test_db.py -v
 | `tests/test_db.py` | The SQLite tables: insert, state changes, lookup, and list order. Uses a temporary database file. |
 
 `uv run pytest` also runs `tests/test_node_agent_helpers.py`. That file checks slot allocation and does not need a virtual machine. `tests/test_node_agent.py` boots real Firecracker virtual machines and skips itself on a machine without root and `/dev/kvm`.
+
+## httpx
+
+Pytest prints one warning: Starlette's test client still imports the `httpx` package, and that import is deprecated in favor of `httpx2` (httpx 2.0). The tests still pass. We are staying on the current httpx (`0.28.1`) for now. Moving to 2.0 can wait.
