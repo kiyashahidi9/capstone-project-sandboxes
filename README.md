@@ -21,18 +21,13 @@ Client / AI Agent (example_agent, client)
     Guest Agent (guest_agent/)
 ```
 
-Locally, a mock API and a Docker container stand in for the real Firecracker VMs:
-
-```text
-example_agent → sdk → mock API (:8000) → guest agent in Docker (:49983)
-```
-
 ## Contents
 
 - [Repository layout](#repository-layout)
 - [Setup](#setup)
   - [Host on Google Cloud](#host-on-google-cloud)
-  - [Local development](#local-development)
+  - [Connecting from your computer](#connecting-from-your-computer)
+  - [Using the client agent](#using-the-client-agent)
   - [Running the tests](#running-the-tests)
 - [Step 1F: Node agent](#step-1f-node-agent)
 - [Step 1G: API server](#step-1g-api-server)
@@ -56,7 +51,6 @@ sbx/
   sdk/             Python SDK + smoke test                               (1H/I)
   client/          interactive chat agent (one sandbox across tasks)     (1H/I)
   example_agent/   one-shot OpenAI coding agent                          (1H/I)
-  mock/            mock sandbox API                                      (1H/I)
   tests/           pytest suite
 ```
 
@@ -101,7 +95,7 @@ For VS Code Remote-SSH, run `gcloud compute config-ssh` (again after each restar
 #### 4. Set up the host (on the VM)
 
 ```bash
-git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git -b 1-setup_host
+git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git
 cd capstone-project-sandboxes/sbx
 chmod +x scripts/*
 sudo scripts/setup_host.sh
@@ -117,6 +111,16 @@ This takes a few minutes. It:
 
 and ends with a checklist. Every line should show `[x]`. It's safe to rerun. To rebuild the base image from scratch, run `sudo scripts/setup_host.sh --rebuild-rootfs`.
 
+#### 5. Start the API server (on the VM)
+
+From `sbx/`:
+
+```bash
+sudo .venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+Leave it running. Check it from a second terminal on the VM with `curl http://localhost:8000/sandboxes`, which should return `[]`. For more detail, see [Start the API server](#start-the-api-server).
+
 #### Stopping and starting the VM
 
 ```bash
@@ -126,12 +130,15 @@ gcloud compute instances start sbx-node-1 --zone=us-east1-b
 
 Stopping ends every running sandbox. After starting, start the API server again (see [Start the API server](#start-the-api-server)).
 
-### Local development
+### Connecting from your computer
+
+The SDK and agents talk to the API server running on the GCP VM (see [Start the API server](#start-the-api-server)). Reach it through an SSH tunnel.
 
 ```bash
 # install uv if you don't have it: https://docs.astral.sh/uv/getting-started/installation/
 
 # set up env vars (at the repo root), then fill in OPENAI_API_KEY in .env
+# SANDBOX_API defaults to http://localhost:8000, the local end of the tunnel
 cp .env.example .env
 
 # run every command below from sbx/
@@ -140,17 +147,32 @@ cd sbx
 # create .venv and install the locked dependencies
 uv sync
 
-# terminal 2: start the mock API (fake sandboxes, forwards to the guest agent)
-uv run uvicorn mock.mock_api:app --port 8000
+# terminal 2: forward localhost:8000 to the API on the VM (unless VS code remote does it already)
+gcloud compute ssh sbx-node-1 --zone=us-east1-b -- -N -L 8000:localhost:8000
 
-# terminal 3: check the guest agent is up -> {"ok": true}
-curl http://localhost:49983/health
-
-# check the SDK end to end, no OpenAI key needed (prints each call and its output)
-uv run python -m sdk.smoke_test
+# check the API is reachable
+curl http://localhost:8000/sandboxes
 ```
 
-Then run the agents; see [Running the agents](#running-the-agents).
+### Using the client agent
+
+The client agent is an interactive chat. It opens one sandbox and keeps it for every task in the session. It needs the API server running on the VM, the SSH tunnel open, and `OPENAI_API_KEY` set in `.env` (see [Connecting from your computer](#connecting-from-your-computer)).
+
+Start it from `sbx/`:
+
+```bash
+uv run python -m client.client
+```
+
+When it prints `sandbox <id> ready`, type a task at the `>` prompt. The agent runs commands and edits files in the sandbox, starting from `/root`, and then prints its answer and `done`. Later tasks run in the same sandbox, so you can build on earlier work:
+
+```
+> clone https://github.com/kiyashahidi9/example-express-app and start the dev server
+> curl the health check
+> add a /time route that returns the current time, then curl it
+```
+
+Type `/quit` to exit. The sandbox is destroyed when you exit, including with Ctrl+C. For the one-shot agent and more examples, see [Running the agents](#running-the-agents).
 
 ### Running the tests
 
@@ -850,7 +872,7 @@ Pytest prints one warning: Starlette's test client still imports the `httpx` pac
 
 ## Steps 1H/I: SDK and example agents
 
-An example coding agent that uses OpenAI to complete tasks inside a sandbox, through the Python SDK in `sdk/`. For setup, see [Local development](#local-development).
+An example coding agent that uses OpenAI to complete tasks inside a sandbox, through the Python SDK in `sdk/`. For setup, see [Connecting from your computer](#connecting-from-your-computer).
 
 ### Running the agents
 
