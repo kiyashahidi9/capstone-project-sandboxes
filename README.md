@@ -39,7 +39,7 @@ Client / AI Agent (example_agent, client)
 
 ## Repository layout
 
-All program code lives in `sbx/`. The `.env` file stays at the repo root.
+All program code lives in `sbx/`. The `.env` file stays at the repo root. Milestone 2 (Track A) changes are summarized in [TRACK_A.md](TRACK_A.md).
 
 ```
 sbx/
@@ -49,7 +49,11 @@ sbx/
   scripts/         host setup, networking and guest agent install scripts
   guest_agent/     HTTP server that runs inside the "VM"
   sdk/             Python SDK + smoke test                               (1H/I)
-  client/          interactive chat agent (one sandbox across tasks)     (1H/I)
+  client/          thin chat app: sends messages, shows events           (2g)
+  runner/          runs the client's agent on the host, once per message (2e)
+  locks.py         one lock per sandbox (turns, pause, resume)           (2e)
+  examples/agent/  example agent that follows the agent contract         (2d)
+  docs/            agent_contract.md: how a client hands us their agent  (2c)
   example_agent/   one-shot OpenAI coding agent                          (1H/I)
   tests/           pytest suite
 ```
@@ -111,15 +115,32 @@ This takes a few minutes. It:
 
 and ends with a checklist. Every line should show `[x]`. It's safe to rerun. To rebuild the base image from scratch, run `sudo scripts/setup_host.sh --rebuild-rootfs`.
 
-#### 5. Start the API server (on the VM)
+#### 5. Add the host's `.env` (on the VM)
+
+The agent runs on the host, so the AI key lives there. From the repo root:
+
+```bash
+cp .env.example .env          # then set OPENAI_API_KEY=...; keep AGENT_CMD as it is
+```
+
+#### 6. Start the API server (on the VM)
 
 From `sbx/`:
 
 ```bash
-sudo .venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
 Leave it running. Check it from a second terminal on the VM with `curl http://localhost:8000/sandboxes`, which should return `[]`. For more detail, see [Start the API server](#start-the-api-server).
+
+#### Updating a host that ran Milestone 1
+
+Pull `track-a`, do step 5, and add the new column to the existing database once, before starting the server. Otherwise every sandbox request fails:
+
+```bash
+git fetch && git checkout track-a && git pull
+sudo sqlite3 /var/sbx/state.db "ALTER TABLE sandboxes ADD COLUMN turn_state TEXT NOT NULL DEFAULT 'idle' CHECK (turn_state IN ('idle', 'working'))"
+```
 
 #### Stopping and starting the VM
 
@@ -137,8 +158,8 @@ The SDK and agents talk to the API server running on the GCP VM (see [Start the 
 ```bash
 # install uv if you don't have it: https://docs.astral.sh/uv/getting-started/installation/
 
-# set up env vars (at the repo root), then fill in OPENAI_API_KEY in .env
-# SANDBOX_API defaults to http://localhost:8000, the local end of the tunnel
+# optional (at the repo root): the chat app needs no OpenAI key; .env only overrides SANDBOX_API,
+# which defaults to http://localhost:8000, the local end of the tunnel
 cp .env.example .env
 
 # run every command below from sbx/
@@ -156,7 +177,7 @@ curl http://localhost:8000/sandboxes
 
 ### Using the client agent
 
-The client agent is an interactive chat. It opens one sandbox and keeps it for every task in the session. It needs the API server running on the VM, the SSH tunnel open, and `OPENAI_API_KEY` set in `.env` (see [Connecting from your computer](#connecting-from-your-computer)).
+The client is a thin chat app. It creates one sandbox and keeps it for the session. Each message goes to the API, which runs the agent **on the host** (`AGENT_CMD` in the host's `.env`), and the app prints the agent's progress as it comes in. It needs the API server running on the VM and the SSH tunnel open.
 
 Start it from `sbx/`:
 
@@ -164,7 +185,7 @@ Start it from `sbx/`:
 uv run python -m client.client
 ```
 
-When it prints `sandbox <id> ready`, type a task at the `>` prompt. The agent runs commands and edits files in the sandbox, starting from `/root`, and then prints its answer and `done`. Later tasks run in the same sandbox, so you can build on earlier work:
+When it prints `sandbox <id> ready`, type a task at the `>` prompt. The agent's steps print as they happen, then `done`. A question from the agent shows as `[waiting on you] ...`, so answer it as your next message. Later tasks run in the same sandbox and see the earlier conversation:
 
 ```
 > clone https://github.com/kiyashahidi9/example-express-app and start the dev server
@@ -172,7 +193,7 @@ When it prints `sandbox <id> ready`, type a task at the `>` prompt. The agent ru
 > add a /time route that returns the current time, then curl it
 ```
 
-Type `/quit` to exit. The sandbox is destroyed when you exit, including with Ctrl+C. For the one-shot agent and more examples, see [Running the agents](#running-the-agents).
+Type `/quit` to exit. The sandbox is destroyed when you exit, including with Ctrl+C. To hand us a different agent, see [docs/agent_contract.md](sbx/docs/agent_contract.md).
 
 ### Running the tests
 
@@ -183,7 +204,7 @@ From `sbx/`, with [uv](https://docs.astral.sh/uv/) installed and Python 3.11 or 
 ```bash
 cd sbx
 uv sync
-uv run pytest tests/test_api.py tests/test_db.py -v
+uv run pytest tests/test_api.py tests/test_db.py tests/test_runner.py tests/test_client.py -v
 ```
 
 `uv sync` installs the project, including pytest.
@@ -197,8 +218,10 @@ uv run pytest tests/test_db.py -v
 
 | File | What it covers |
 |------|----------------|
-| `tests/test_api.py` | Create, list, get, delete, exec, and file read/write. The boot, command, and file calls are faked. |
+| `tests/test_api.py` | Create, list, get, delete, exec, file read/write, messages and events. The boot, command, and file calls are faked. |
 | `tests/test_db.py` | The SQLite tables: insert, state changes, lookup, and list order. Uses a temporary database file. |
+| `tests/test_runner.py` | The agent runner, with tiny fake agents: output, questions, failures, timeouts, stopping a turn. |
+| `tests/test_client.py` | The chat app end to end (client → API → runner → fake agent), with the VM faked. |
 
 `uv run pytest` also runs `tests/test_node_agent_helpers.py`. That file checks slot allocation and does not need a virtual machine. `tests/test_node_agent.py` boots real Firecracker virtual machines and skips itself on a machine without root and `/dev/kvm`.
 
@@ -631,7 +654,7 @@ When FastAPI starts:
 Run the API on the Linux host:
 
 ```bash
-sudo .venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
 The server listens on port `8000`.
@@ -784,7 +807,7 @@ Verify that SQLite persistence allows the API server to recover running sandboxe
 5. Restart the API server:
 
 ```bash
-sudo .venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
 6. List the sandboxes:
@@ -862,7 +885,7 @@ Checking whether a PID exists is a minimum recovery check. A production implemen
 
 #### Binding to `0.0.0.0`
 
-The API controls privileged host operations. Binding to `0.0.0.0` exposes it on all host interfaces. Restrict network access and add authentication before allowing untrusted clients to connect.
+The API controls privileged host operations. Binding to `0.0.0.0` exposes it on all host interfaces. Restrict network access and add authentication before allowing untrusted clients to connect. Since Milestone 2 the API binds to `127.0.0.1` instead, because agents run on the host; clients reach it through the SSH tunnel.
 
 #### Staying on httpx 0.28
 

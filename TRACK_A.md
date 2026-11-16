@@ -10,7 +10,7 @@ The agent moves from the client onto the host. The host runs it once per message
 | 2e Agent runner | Done (plain Popen) |
 | 2f Guardrails | — |
 | 2g Thin chat client | Done |
-| 2h Acceptance test | — |
+| 2h Acceptance test | Checklist written; needs a run by a teammate |
 
 ## 2b: Event log and messages
 
@@ -100,3 +100,7 @@ Also:
 - `DELETE /sandboxes/{id}` now stops a running turn first.
 
 Tests: `tests/test_client.py` runs the chat end to end (client → API → runner → fake agent), with only the VM faked.
+
+## 2h: Acceptance test
+
+[`sbx/tests/acceptance_agent.md`](sbx/tests/acceptance_agent.md) is the Milestone 2 checklist: it sets up the host's `.env`, then runs clone, install, dev server, `/health` and a follow-up through the thin chat, followed by the cleanup checks. The guardrail (2f) and pause/resume (Track C) steps are marked ⏸ until those are built. Someone who didn't write the code runs it on a fresh host.
