@@ -9,9 +9,6 @@ CREATE TABLE IF NOT EXISTS slots (
 );
 
 -- One row per sandbox the API created; owned by the API server, rows kept after destroy.
--- A state.db made before turn_state existed won't get the column from this file; add it once with:
---   sqlite3 /var/sbx/state.db "ALTER TABLE sandboxes ADD COLUMN turn_state TEXT NOT NULL DEFAULT 'idle' CHECK (turn_state IN ('idle', 'working'))"
--- or destroy every sandbox first and then delete state.db.
 CREATE TABLE IF NOT EXISTS sandboxes (
     id          TEXT PRIMARY KEY,   -- sbx_<32 hex>, matches slots.sandbox_id
     state       TEXT NOT NULL CHECK (state IN ('starting', 'running', 'destroyed')),  -- adding a state later means rebuilding this table

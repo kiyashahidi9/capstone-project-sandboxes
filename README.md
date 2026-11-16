@@ -139,15 +139,6 @@ sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
 
 Leave it running. Check it from a second terminal on the VM with `curl -H "Authorization: Bearer <admin key>" http://localhost:8000/sandboxes`, which should return `{"sandboxes":[]}`. For more detail, see [Start the API server](#start-the-api-server).
 
-#### Updating a host that ran Milestone 1
-
-Pull `track-a`, do step 5 (fill in the new `.env` lines), and add the new column to the existing database once, before starting the server. Otherwise every sandbox request fails:
-
-```bash
-git fetch && git checkout track-a && git pull
-sudo sqlite3 /var/sbx/state.db "ALTER TABLE sandboxes ADD COLUMN turn_state TEXT NOT NULL DEFAULT 'idle' CHECK (turn_state IN ('idle', 'working'))"
-```
-
 #### Stopping and starting the VM
 
 ```bash

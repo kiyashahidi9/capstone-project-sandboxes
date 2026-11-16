@@ -17,10 +17,6 @@ The agent moves from the client onto the host. The host runs it once per message
 **Database** (`db/schema.sql`)
 - New `events` table: one row per thing that happened (`sandbox_id`, `seq`, `type`, `data` as JSON, `at`). `seq` counts 1, 2, 3, ... per sandbox.
 - New `sandboxes.turn_state` column: `idle` or `working`.
-- On an existing `state.db`, add the column once:
-  ```bash
-  sqlite3 /var/sbx/state.db "ALTER TABLE sandboxes ADD COLUMN turn_state TEXT NOT NULL DEFAULT 'idle' CHECK (turn_state IN ('idle', 'working'))"
-  ```
 
 **Endpoints** (`api/main.py`)
 
