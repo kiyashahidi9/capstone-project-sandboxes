@@ -7,9 +7,9 @@ The agent moves from the client onto the host. The host runs it once per message
 | 2b Event log and messages | Done |
 | 2c Agent contract | Done |
 | 2d Example agent | Built; hand test pending |
-| 2e Agent runner | Placeholder |
+| 2e Agent runner | Done (plain Popen) |
 | 2f Guardrails | — |
-| 2g Thin chat client | — |
+| 2g Thin chat client | Done |
 | 2h Acceptance test | — |
 
 ## 2b: Event log and messages
@@ -52,11 +52,51 @@ Decided beyond the spec:
 **SDK** (`sdk/sandbox.py`)
 - `Sandbox(id, api, token=None)` sends `Authorization: Bearer <token>` when given a token.
 - `Sandbox.from_env()` builds one from `SANDBOX_ID`, `SANDBOX_API` and `SANDBOX_TOKEN`.
-- `pyproject.toml` now installs `sdk` into the venv, so agents can import it from any folder. Run `uv sync` once after pulling.
+- `pyproject.toml` now installs `sdk` into the venv, so agents can import it from any folder.
 
-**Try it** (from `sbx/`, with the API running):
+**Try it** on the host, with the API running. This makes a sandbox, runs the agent on one task, then destroys the sandbox:
 ```bash
-echo "create hello.py that prints hello, and run it" | \
-  SANDBOX_ID=<id> SANDBOX_API=http://127.0.0.1:8000 SANDBOX_HISTORY=/dev/null \
-  uv run python examples/agent/agent.py
+bash sbx/scripts/try_agent.sh "create hello.py that prints hello, and run it"
 ```
+
+## 2e: Agent runner
+
+`sbx/runner/runner.py` runs the agent for each message and records the turn. `sbx/locks.py` gives each sandbox one lock, shared with pause and resume.
+
+| Function | Does |
+|----------|------|
+| `run_turn(id)` | Takes the lock, records `turn_started`, runs `AGENT_CMD` with the contract's inputs, turns each stdout line into an event, then records `turn_finished` or `turn_failed` and sets `idle` |
+| `stop_turn(id)` | For pause: kills the agent, records `turn_failed` (`paused`), and returns once the sandbox is idle. Call it before taking the lock |
+| `recover_interrupted_turns()` | On server start: any sandbox still `working` gets `turn_failed` (`server restarted`) and goes back to `idle` |
+
+**Setup** (in `.env`, see `.env.example`):
+- `AGENT_CMD=.venv/bin/python examples/agent/agent.py` (relative to `sbx/`)
+- `AGENT_TURN_TIMEOUT=1800` is optional. Past it, the agent and anything it started are killed (`timeout`).
+
+`turn_failed` has a `reason`: `exit`, `timeout`, `paused`, `server restarted`, or a startup error. When the agent ran, it also has `exit_code` and `stderr_tail`, the last 50 lines of stderr.
+
+Tests: `uv run pytest tests/test_runner.py` uses tiny fake agents.
+
+## 2g: Thin chat client
+
+`sbx/client/client.py` is now a thin chat app with no agent and no AI key inside. It creates a sandbox, sends each message with `POST /messages`, and polls `GET /events` every second until the turn ends:
+
+```
+sandbox sbx_58e4... ready
+> create hello.py that prints hello, and run it
+[write] /root/hello.py
+[run] python hello.py
+      hello
+I created hello.py and ran it.
+done
+> /quit
+sandbox sbx_58e4... destroyed
+```
+
+A question shows as `[waiting on you] ...`, and a failed turn as `error: <reason>` with the end of the agent's stderr. Run it from `sbx/` with `uv run python -m client.client`.
+
+Also:
+- The SDK gained `send_message(text)` and `events(after)`.
+- `DELETE /sandboxes/{id}` now stops a running turn first.
+
+Tests: `tests/test_client.py` runs the chat end to end (client → API → runner → fake agent), with only the VM faked.

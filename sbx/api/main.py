@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
@@ -40,6 +41,11 @@ from api.models import (
     SandboxListResponse,
     SandboxState,
 )
+from runner import runner
+
+
+# AGENT_CMD, AGENT_TURN_TIMEOUT and the AI key come from .env at the repo root
+load_dotenv()
 
 
 # ---------------------------------------------------------------------------
@@ -48,8 +54,9 @@ from api.models import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Gets the database ready before the server starts taking requests."""
-    db.create_tables();
+    """Gets the database ready and ends turns a crash cut off, before taking requests."""
+    db.create_tables()
+    runner.recover_interrupted_turns()
     yield
 
 
@@ -88,6 +95,8 @@ def delete_sandbox(sandbox_id: str) -> dict[str, bool]:
     """Shuts a sandbox down for good; asking twice is harmless."""
     row = require_sandbox(sandbox_id)
     if not is_destroyed(row):
+        # an agent mid-turn would keep calling a sandbox that's gone
+        runner.stop_turn(sandbox_id)
         tear_down(sandbox_id)
     return {"ok": True}
 

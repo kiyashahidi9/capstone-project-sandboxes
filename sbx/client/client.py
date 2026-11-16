@@ -1,67 +1,71 @@
-import json
-import posixpath
+"""
+The thin chat app (Build Plan 2g)
+no agent and no AI key here: the agent runs on the host, and this app only sends messages and shows events
+run from sbx/:
+    uv run python -m client.client
+"""
 
-from dotenv import load_dotenv
-from openai import OpenAI
+## IMPORTS ##
 
-from examples.agent.tools import build_tools   # moved in 2d; this client is replaced in 2g
-from sdk.sandbox import Sandbox
+import time
+
+from sdk.sandbox import Sandbox, SandboxError
+
 
 ## CONFIG ##
 
-# reads OPENAI_API_KEY from .env
-load_dotenv()
-client = OpenAI()
-
-MODEL = "gpt-4.1"
-MAX_STEPS = 50      # most model calls per task, so a confused agent can't loop forever
-
-WORKDIR = "/root"   # where commands run and relative file paths point; must exist in the VM
-TOOLS = build_tools(WORKDIR)   # the tool descriptions tell the model about WORKDIR
-
-SYSTEM_PROMPT = (
-    "You are a coding agent working in a Linux sandbox. "
-    "Use the tools to do the task. "
-    "Start long-running servers with background=true."
-)
+POLL_SECONDS = 1          # how often to ask for new events while a turn runs
+STDERR_LINES_SHOWN = 5    # how much of a failed agent's stderr to show
 
 
-## TOOL RUNNER ##
+## SHOWING EVENTS ##
 
-def run_tool(sandbox: Sandbox, name: str, args: dict) -> str:
+def show_event(event: dict) -> bool:
     """
-    Runs one tool call from the model in the sandbox
-    prints what it's doing
-    returns the result as text for the model
+    Prints one event for the user
+    returns True when the event ends the turn
     """
-    if name == "run_command":
-        background = args.get("background", False)
-        print(f"[run] {args['cmd']}" + ("   (background)" if background else ""))
+    kind = event["type"]
+    data = event["data"]
 
-        result = sandbox.exec(args["cmd"], cwd=WORKDIR, background=background)
+    if kind == "agent_output":
+        print(data["text"])
 
-        # show the first few lines of output
-        output = result.get("stdout", "") + result.get("stderr", "")
-        for line in output.splitlines()[:5]:
+    elif kind == "question":
+        print(f"[waiting on you] {data['text']}")
+
+    elif kind == "turn_finished":
+        print("done")
+        return True
+
+    elif kind == "turn_failed":
+        print(f"error: {data.get('reason', 'unknown')}")
+
+        # the end of the agent's stderr, if it ran
+        stderr_lines = data.get("stderr_tail", "").splitlines()
+        for line in stderr_lines[-STDERR_LINES_SHOWN:]:
             print(f"      {line}")
+        return True
 
-        return json.dumps(result)
+    elif kind in ("paused", "resumed"):
+        print(f"[{kind}]")
 
-    path = absolute_path(args["path"])
-
-    if name == "read_file":
-        print(f"[read] {path}")
-        return sandbox.read_file(path)
-
-    # otherwise it's write_file
-    print(f"[write] {path}")
-    sandbox.write_file(path, args["content"])
-    return "ok"
+    # user_message and turn_started: nothing to show
+    return False
 
 
-def absolute_path(path: str) -> str:
-    """Turns a path relative to WORKDIR into an absolute one; absolute paths pass through."""
-    return posixpath.join(WORKDIR, path)
+def wait_for_turn(sandbox: Sandbox, last_seq: int) -> int:
+    """
+    Shows the turn's events as they arrive, until it finishes or fails
+    returns the last seq seen, for the next turn
+    """
+    while True:
+        for event in sandbox.events(after=last_seq):
+            last_seq = event["seq"]
+            if show_event(event):
+                return last_seq
+
+        time.sleep(POLL_SECONDS)
 
 
 ## CHAT LOOP ##
@@ -69,53 +73,34 @@ def absolute_path(path: str) -> str:
 def main() -> None:
     """
     Starts a sandbox
-    reads tasks from the terminal until /quit
-    lets the model call tools until it answers in plain text
+    sends each message to the agent on the host and shows its progress, until /quit
     destroys the sandbox on exit
     """
     sandbox = Sandbox.create()
     print(f"sandbox {sandbox.id} ready")
 
-    # the whole conversation, sent to the model on every call
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    last_seq = 0   # the newest event already shown
 
     try:
-        while (task := input("> ").strip()) != "/quit":
-            messages.append({"role": "user", "content": task})
+        while (text := input("> ").strip()) != "/quit":
+            if not text:
+                continue
 
-            for _ in range(MAX_STEPS):
-                # ask the model what to do next
-                response = client.chat.completions.create(
-                    model=MODEL,
-                    messages=messages,
-                    tools=TOOLS,
-                )
-                message = response.choices[0].message
-                messages.append(message)
+            try:
+                sandbox.send_message(text)
+            except SandboxError as error:
+                print(f"error: {error.detail}")
+                continue
 
-                # no tool calls: the model is done, print its answer
-                if not message.tool_calls:
-                    print(message.content)
-                    print("done")
-                    break
+            last_seq = wait_for_turn(sandbox, last_seq)
 
-                # run each tool call and send the result back to the model
-                for call in message.tool_calls:
-                    try:
-                        args = json.loads(call.function.arguments)
-                        output = run_tool(sandbox, call.function.name, args)
-                    except Exception as e:
-                        output = f"error: {e}"      # the model sees the error and can retry
-
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "content": output,
-                    })
+    except (KeyboardInterrupt, EOFError):
+        print()   # Ctrl+C or Ctrl+D: end the line and clean up
 
     finally:
-        # always clean up, even on Ctrl+C or a crash
+        # always clean up, even on Ctrl+C or a crash; this also stops a running turn
         sandbox.destroy()
+        print(f"sandbox {sandbox.id} destroyed")
 
 
 if __name__ == "__main__":

@@ -237,6 +237,44 @@ class Sandbox:
 
         _call_api("PUT", url, params=params, content=data, headers=self._headers)
 
+    def send_message(self, text: str) -> int:
+        """Send the user's message to the sandbox's agent.
+
+        Returns right away; the agent works in the background on the host.
+        Follow its progress with `events()`.
+
+        Args:
+            text: The message, e.g. "create hello.py and run it".
+
+        Returns:
+            The message's `seq` in the event log.
+
+        Raises:
+            SandboxError: 409 if a turn is already running or the sandbox
+                isn't running.
+        """
+
+        url = f"{self._url}/messages"
+        res = _call_api("POST", url, json={"text": text}, headers=self._headers)
+
+        return res.json()["seq"]
+
+    def events(self, after: int = 0) -> list[dict]:
+        """Get the sandbox's events with a `seq` greater than `after`.
+
+        Args:
+            after: The last `seq` already seen; 0 for everything.
+
+        Returns:
+            The new events, oldest first. Each has `seq`, `type`, `data` and
+            `at` (unix seconds).
+        """
+
+        url = f"{self._url}/events"
+        res = _call_api("GET", url, params={"after": after}, headers=self._headers)
+
+        return res.json()["events"]
+
     def destroy(self) -> None:
         """Stop the sandbox and delete everything in it.
 
