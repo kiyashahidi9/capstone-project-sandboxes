@@ -119,3 +119,7 @@ The client's agent can now only reach the AI and its own sandbox.
 **For development only:** `AGENT_ISOLATION=none` runs the agent without `systemd-run`. The tests use it.
 
 **Known gap:** all agents run as the same `sbx-agent` user, so two turns running at once could read each other's token from `/proc`. Fixing it means a separate user per turn (systemd's `DynamicUser=yes`).
+
+## Open questions
+
+- **One agent per host, or one per sandbox?** We built one `AGENT_CMD` per host, so every sandbox runs the same agent. The spec implies this (2c, 2h) but never says it, and 2f's "Agents live in `/opt/agents`" (plural) hints at more than one. Supporting one per sandbox would mean an allowlist of agents on the host and an `agent` field on `POST /sandboxes`, never a command sent by the client.

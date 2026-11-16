@@ -127,7 +127,7 @@ sudo scripts/setup_agents.sh  # every checklist line should show [x]
 
 Make the admin key with `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` and share it with your teammates. Every API request needs it.
 
-`setup_agents.sh` creates the `sbx-agent` user, installs the agent in `/opt/agents`, and makes `.env` root only, so edit it with `sudo nano ../.env` afterwards. Rerun it after `setup_host.sh` (which hands `.env` back to you) and after changing the agent.
+`setup_agents.sh` creates the `sbx-agent` user, installs the agent in `/opt/agents`, and makes `.env` root only. You don't need to edit `.env` afterwards, but if you change it later, use `sudo nano ../.env`. Rerun it after `setup_host.sh` (which hands `.env` back to you) and after changing the agent.
 
 #### 6. Start the API server (on the VM)
 

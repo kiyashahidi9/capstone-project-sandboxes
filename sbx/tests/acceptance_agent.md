@@ -30,7 +30,7 @@ sudo scripts/setup_agents.sh  # locks the agent down; every checklist line must 
 pgrep firecracker             # must print nothing (no sandboxes running)
 ```
 
-Make the admin key with `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`. After `setup_agents.sh`, `.env` is root only: edit it with `sudo nano ../.env`.
+Make the admin key with `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`. After `setup_agents.sh`, `.env` is root only. No edit is needed, but any later change needs `sudo nano ../.env`.
 
 **Laptop:** get the same code and install dependencies. The laptop needs the admin key but no OpenAI key.
 

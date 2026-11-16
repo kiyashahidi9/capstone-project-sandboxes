@@ -89,7 +89,14 @@ check "$AGENT_USER can't read .env"            bash -c "! sudo -u $AGENT_USER ca
 check "systemd-run starts $AGENT_USER"         bash -c "[[ \$(systemd-run --wait --pipe --quiet --collect --uid=$AGENT_USER -p ProtectHome=yes whoami) == $AGENT_USER ]]"
 (( FAILS == 0 )) || die "$FAILS check(s) failed"
 
+# only ask for an edit if .env doesn't already point at the locked-down agent
+WANTED_CMD="$AGENTS_DIR/.venv/bin/python $AGENTS_DIR/agent.py"
+CURRENT_CMD=$(grep -E '^AGENT_CMD=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+
 echo
-echo "Agents locked down. In $ENV_FILE (sudo nano $ENV_FILE), set:"
-echo "  AGENT_CMD=$AGENTS_DIR/.venv/bin/python $AGENTS_DIR/agent.py"
-echo "then restart the API server."
+echo "Agents locked down."
+if [[ $CURRENT_CMD != "$WANTED_CMD" ]]; then
+  echo "Change AGENT_CMD in .env (sudo nano $ENV_FILE) to:"
+  echo "  AGENT_CMD=$WANTED_CMD"
+fi
+echo "Restart the API server if it's running. To edit .env later, use sudo: it's root only now."
