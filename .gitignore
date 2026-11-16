@@ -5,6 +5,7 @@
 !/sbx/
 !/.gitignore
 !/README.md
+!/TRACK_A.md
 !/.githooks/
 !/.env.example
 
