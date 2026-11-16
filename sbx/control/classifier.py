@@ -1,4 +1,6 @@
-"""Name the agent's activity for one window, and why: WORKING, WAITING, IDLE, or UNKNOWN. An open tool call stays WORKING. Its id comes from the payload, or the event id when the payload has none. This file does not pause or resume."""
+"""Name the agent's activity for one window, and why: WORKING, WAITING, IDLE, or UNKNOWN. 
+An open tool call stays WORKING. Its id comes from the payload, 
+or the event id when the payload has none. This file does not pause or resume."""
 
 from __future__ import annotations
 
