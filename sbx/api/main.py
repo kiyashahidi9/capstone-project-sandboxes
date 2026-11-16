@@ -3,13 +3,14 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 
 import node_agent
 from api import db
 from api.helpers import (
+    HTTP_ACCEPTED,
     HTTP_CREATED,
     boot_sandbox,
     build_create_response,
@@ -17,7 +18,9 @@ from api.helpers import (
     fetch_file,
     require_running,
     require_sandbox,
+    require_turn,
     run_command,
+    start_turn_in_background,
     store_file,
     tear_down,
     text_from_body,
@@ -26,9 +29,13 @@ from api.helpers import (
 )
 from api.models import (
     CreateSandboxResponse,
+    EventListResponse,
+    EventType,
     ExecuteBackgroundResponse,
     ExecuteRequest,
     ExecuteResponse,
+    MessageRequest,
+    MessageResponse,
     SandboxInfo,
     SandboxListResponse,
     SandboxState,
@@ -116,3 +123,34 @@ async def write_file(sandbox_id: str, path: str, request: Request) -> dict[str, 
     content = text_from_body(await request.body())
     await run_in_threadpool(store_file, sandbox_id, path, content)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Endpoints: the conversation
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/sandboxes/{sandbox_id}/messages",
+    status_code=HTTP_ACCEPTED,
+    response_model=MessageResponse,
+)
+def send_message(sandbox_id: str, request: MessageRequest) -> MessageResponse:
+    """
+    Saves the user's message and starts the agent on it in the background
+    answers 409 if the sandbox isn't running or a turn is already running
+    """
+    require_running(sandbox_id)
+    require_turn(sandbox_id)
+
+    # the message is an event too, so the history has the whole conversation
+    seq = db.append_event(sandbox_id, EventType.USER_MESSAGE, {"text": request.text})
+
+    start_turn_in_background(sandbox_id)
+    return MessageResponse(seq=seq)
+
+
+@app.get("/sandboxes/{sandbox_id}/events", response_model=EventListResponse)
+def list_events(sandbox_id: str, after: int = Query(default=0, ge=0)) -> EventListResponse:
+    """Shows every event after seq `after`, oldest first; works for destroyed sandboxes too."""
+    require_sandbox(sandbox_id)
+    return EventListResponse(events=db.list_events(sandbox_id, after))

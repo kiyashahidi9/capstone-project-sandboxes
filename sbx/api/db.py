@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import time
 from contextlib import closing
 from pathlib import Path
 
-from api.models import SandboxRow, SandboxState
+from api.models import Event, EventType, SandboxRow, SandboxState, TurnState
 from node_agent import db_path
 
 
@@ -15,7 +16,7 @@ DB_BUSY_TIMEOUT = 5.0             # seconds a writer waits for another writer be
 
 # Sandboxes joined to slots; LEFT JOIN keeps sandboxes that hold no slot (their n is NULL).
 SELECT_SANDBOXES = """
-    SELECT sandboxes.id, sandboxes.state, sandboxes.created_at, sandboxes.updated_at, slots.n
+    SELECT sandboxes.id, sandboxes.state, sandboxes.created_at, sandboxes.updated_at, sandboxes.turn_state, slots.n
     FROM sandboxes
     LEFT JOIN slots ON slots.sandbox_id = sandboxes.id
 """
@@ -84,6 +85,54 @@ def set_state(sandbox_id: str, state: SandboxState) -> bool:
     return cursor.rowcount == 1
 
 
+def claim_turn(sandbox_id: str) -> bool:
+    """
+    Marks an idle sandbox as working
+    one statement, so two requests at once can't both win
+    says whether this call won
+    """
+    with closing(connect()) as conn:
+        cursor = conn.execute(
+            "UPDATE sandboxes SET turn_state = ? WHERE id = ? AND turn_state = ?",
+            (TurnState.WORKING, sandbox_id, TurnState.IDLE),
+        )
+    return cursor.rowcount == 1
+
+
+def set_turn_state(sandbox_id: str, turn_state: TurnState) -> None:
+    """Sets whether the sandbox's agent is running a turn."""
+    with closing(connect()) as conn:
+        conn.execute(
+            "UPDATE sandboxes SET turn_state = ? WHERE id = ?",
+            (turn_state, sandbox_id),
+        )
+
+
+def append_event(sandbox_id: str, event_type: EventType, data: dict) -> int:
+    """
+    Adds an event to the end of the sandbox's conversation
+    one statement, so two writers can't get the same seq
+    returns the new event's seq
+    """
+    with closing(connect()) as conn:
+        row = conn.execute(
+            """
+            INSERT INTO events (sandbox_id, seq, type, data, at)
+            SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, ?, ?
+            FROM events WHERE sandbox_id = ?
+            RETURNING seq
+            """,
+            (
+                sandbox_id,
+                event_type,
+                json.dumps(data),
+                now(),
+                sandbox_id,   # for the WHERE: count only this sandbox's events
+            ),
+        ).fetchone()
+    return row["seq"]
+
+
 # ---------------------------------------------------------------------------
 # Reads
 # ---------------------------------------------------------------------------
@@ -112,3 +161,16 @@ def list_live_sandboxes() -> list[SandboxRow]:
             (SandboxState.DESTROYED,),
         ).fetchall()
     return [to_sandbox_row(row) for row in rows]
+
+
+def list_events(sandbox_id: str, after: int = 0) -> list[Event]:
+    """Lists the sandbox's events with seq greater than after, oldest first."""
+    with closing(connect()) as conn:
+        rows = conn.execute(
+            "SELECT seq, type, data, at FROM events WHERE sandbox_id = ? AND seq > ? ORDER BY seq",
+            (sandbox_id, after),
+        ).fetchall()
+    return [
+        Event(seq=row["seq"], type=row["type"], data=json.loads(row["data"]), at=row["at"])
+        for row in rows
+    ]

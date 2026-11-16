@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 import httpx
 from fastapi import HTTPException
 
@@ -14,6 +16,7 @@ from api.models import (
     SandboxRow,
     SandboxState,
 )
+from runner import runner
 
 
 HTTP_NOT_FOUND = 404
@@ -22,6 +25,7 @@ HTTP_SERVER_ERROR = 500
 HTTP_BAD_GATEWAY = 502
 HTTP_SERVICE_UNAVAILABLE = 503
 HTTP_CREATED = 201
+HTTP_ACCEPTED = 202
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +46,12 @@ def require_running(sandbox_id: str) -> SandboxRow:
     if row.state != SandboxState.RUNNING:
         raise HTTPException(status_code=HTTP_CONFLICT, detail="Sandbox is not running")
     return row
+
+
+def require_turn(sandbox_id: str) -> None:
+    """Marks the sandbox as working, or answers 409 if a turn is already running."""
+    if not db.claim_turn(sandbox_id):
+        raise HTTPException(status_code=HTTP_CONFLICT, detail="A turn is already running")
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +82,7 @@ def build_create_response(sandbox_id: str, boot_seconds: float) -> CreateSandbox
         ip=info.ip,
         created_at=info.created_at,
         updated_at=info.updated_at,
+        turn_state=info.turn_state,
         boot_seconds=boot_seconds,
     )
 
@@ -164,3 +175,21 @@ def store_file(sandbox_id: str, path: str, content: str) -> None:
         raise guest_error_to_http(error) from error
     except httpx.RequestError as error:
         raise HTTPException(status_code=HTTP_BAD_GATEWAY, detail="Guest agent failed") from error
+
+
+# ---------------------------------------------------------------------------
+# Turns
+# ---------------------------------------------------------------------------
+
+def start_turn_in_background(sandbox_id: str) -> None:
+    """
+    Runs the agent for this sandbox's new message without making the request wait
+    daemon thread, so a turn in progress doesn't block the server from shutting down
+    """
+    thread = threading.Thread(
+        target=runner.run_turn,
+        args=(sandbox_id,),
+        name=f"turn-{sandbox_id}",
+        daemon=True,
+    )
+    thread.start()

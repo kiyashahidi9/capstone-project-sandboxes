@@ -9,9 +9,23 @@ CREATE TABLE IF NOT EXISTS slots (
 );
 
 -- One row per sandbox the API created; owned by the API server, rows kept after destroy.
+-- A state.db made before turn_state existed won't get the column from this file; add it once with:
+--   sqlite3 /var/sbx/state.db "ALTER TABLE sandboxes ADD COLUMN turn_state TEXT NOT NULL DEFAULT 'idle' CHECK (turn_state IN ('idle', 'working'))"
+-- or destroy every sandbox first and then delete state.db.
 CREATE TABLE IF NOT EXISTS sandboxes (
     id          TEXT PRIMARY KEY,   -- sbx_<32 hex>, matches slots.sandbox_id
     state       TEXT NOT NULL CHECK (state IN ('starting', 'running', 'destroyed')),  -- adding a state later means rebuilding this table
     created_at  INTEGER NOT NULL,   -- unix seconds
-    updated_at  INTEGER NOT NULL    -- unix seconds, changes with state
+    updated_at  INTEGER NOT NULL,   -- unix seconds, changes with state
+    turn_state  TEXT NOT NULL DEFAULT 'idle' CHECK (turn_state IN ('idle', 'working'))  -- is the agent running a turn right now
+);
+
+-- The whole conversation of each sandbox, user messages included; owned by the API server, never edited.
+CREATE TABLE IF NOT EXISTS events (
+    sandbox_id  TEXT NOT NULL,
+    seq         INTEGER NOT NULL,   -- 1, 2, 3, ... per sandbox
+    type        TEXT NOT NULL,      -- user_message | agent_output | question | turn_started | turn_finished | turn_failed | paused | resumed
+    data        TEXT NOT NULL,      -- JSON
+    at          INTEGER NOT NULL,   -- unix seconds
+    PRIMARY KEY (sandbox_id, seq)
 );
