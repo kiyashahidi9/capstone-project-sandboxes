@@ -918,11 +918,11 @@ Commands run in `/root` by default, so relative paths work in `run_command`. The
 
 The client (`client/client.py`) handles this with a single `WORKDIR` setting, used in three places:
 
-- `build_tools(WORKDIR)` (`client/tools.py`) puts the working directory in each tool's description.
+- `build_tools(WORKDIR)` (`examples/agent/tools.py`) puts the working directory in each tool's description.
 - `run_command` runs with `cwd=WORKDIR`, so commands run where the descriptions say they do.
 - `absolute_path()` joins relative `read_file`/`write_file` paths onto `WORKDIR`.
 
-Any other client should do the same. Tell the model the working directory, through the system prompt, the tool descriptions (`client/tools.py`), or both. Make sure the directory it's told about is the one commands actually run in. If you change `WORKDIR`, that folder must already exist in the VM, or `exec` returns a 400.
+Any other client should do the same. Tell the model the working directory, through the system prompt, the tool descriptions (`examples/agent/tools.py`), or both. Make sure the directory it's told about is the one commands actually run in. If you change `WORKDIR`, that folder must already exist in the VM, or `exec` returns a 400.
 
 ### 1H/I tradeoffs
 

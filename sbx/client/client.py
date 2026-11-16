@@ -4,7 +4,7 @@ import posixpath
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from client.tools import build_tools
+from examples.agent.tools import build_tools   # moved in 2d; this client is replaced in 2g
 from sdk.sandbox import Sandbox
 
 ## CONFIG ##

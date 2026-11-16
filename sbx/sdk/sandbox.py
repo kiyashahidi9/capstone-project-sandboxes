@@ -62,6 +62,13 @@ def _call_api(
     return res
 
 
+def auth_headers(token: str | None) -> dict[str, str]:
+    """The Authorization header for a token, or no headers without one."""
+    if token is None:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
+
+
 class Sandbox:
     """A sandbox: an isolated Linux VM managed by the sandbox API.
 
@@ -82,7 +89,7 @@ class Sandbox:
         api: The base URL of the sandbox API.
     """
 
-    def __init__(self, id: str, api: str = DEFAULT_API):
+    def __init__(self, id: str, api: str = DEFAULT_API, token: str | None = None):
         """Attach to an existing sandbox by id.
 
         This makes no API call, so it does not check that the sandbox exists.
@@ -91,22 +98,49 @@ class Sandbox:
         Args:
             id: The id of an existing sandbox, e.g. "sbx1".
             api: The base URL of the sandbox API. Defaults to `$SANDBOX_API`.
+            token: Sent as `Authorization: Bearer <token>` on every request,
+                if given.
         """
         self.id = id
         self.api = api.rstrip("/")
         self._url = f"{self.api}/sandboxes/{id}"
+        self._headers = auth_headers(token)
+
+    @classmethod
+    def from_env(cls) -> "Sandbox":
+        """Attach to the sandbox an agent was started for.
+
+        Reads `SANDBOX_ID`, `SANDBOX_API` and `SANDBOX_TOKEN`, which the agent
+        runner sets for each turn (see docs/agent_contract.md).
+
+        Returns:
+            The sandbox, ready to use.
+
+        Raises:
+            RuntimeError: If `SANDBOX_ID` is not set.
+        """
+
+        sandbox_id = os.environ.get("SANDBOX_ID")
+        if not sandbox_id:
+            raise RuntimeError("SANDBOX_ID is not set")
+
+        api = os.environ.get("SANDBOX_API", DEFAULT_API)
+        token = os.environ.get("SANDBOX_TOKEN") or None   # an empty value means no token
+
+        return cls(sandbox_id, api, token)
 
     def __repr__(self) -> str:
         return f"Sandbox(id={self.id!r}, api={self.api!r})"
 
     @classmethod
-    def create(cls, api: str = DEFAULT_API) -> "Sandbox":
+    def create(cls, api: str = DEFAULT_API, token: str | None = None) -> "Sandbox":
         """Start a new sandbox.
 
         Blocks until the sandbox's VM has booted, for up to `CREATE_TIMEOUT` seconds.
 
         Args:
             api: The base URL of the sandbox API. Defaults to `$SANDBOX_API`.
+            token: Sent as `Authorization: Bearer <token>`, if given.
 
         Returns:
             The new, running sandbox.
@@ -116,10 +150,10 @@ class Sandbox:
         """
 
         url = f"{api.rstrip('/')}/sandboxes"
-        res = _call_api("POST", url, timeout=CREATE_TIMEOUT)
+        res = _call_api("POST", url, timeout=CREATE_TIMEOUT, headers=auth_headers(token))
         sandbox_id = res.json()["id"]
 
-        return cls(sandbox_id, api)
+        return cls(sandbox_id, api, token)
 
     def exec(
             self, 
@@ -156,7 +190,7 @@ class Sandbox:
 
         url = f"{self._url}/exec"
         body = {"cmd": cmd, "cwd": cwd, "background": background}
-        res = _call_api("POST", url, timeout=EXEC_TIMEOUT, json=body)
+        res = _call_api("POST", url, timeout=EXEC_TIMEOUT, json=body, headers=self._headers)
 
         return res.json()
 
@@ -178,7 +212,7 @@ class Sandbox:
 
         url = f"{self._url}/files"
         params = {"path": path}
-        res = _call_api("GET", url, params=params)
+        res = _call_api("GET", url, params=params, headers=self._headers)
 
         return res.text
 
@@ -201,7 +235,7 @@ class Sandbox:
         params = {"path": path}
         data = content.encode()
 
-        _call_api("PUT", url, params=params, content=data)
+        _call_api("PUT", url, params=params, content=data, headers=self._headers)
 
     def destroy(self) -> None:
         """Stop the sandbox and delete everything in it.
@@ -213,4 +247,4 @@ class Sandbox:
             SandboxError: 409 if the sandbox has already been destroyed.
         """
 
-        _call_api("DELETE", self._url)
+        _call_api("DELETE", self._url, headers=self._headers)
