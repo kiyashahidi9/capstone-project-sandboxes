@@ -37,6 +37,8 @@ else:
 def api(tmp_path, monkeypatch):
     """The real API in-process, with fake VMs and a fake agent; the SDK talks to it."""
     monkeypatch.setenv("SBX_DB", str(tmp_path / "state.db"))
+    monkeypatch.setenv("SANDBOX_ADMIN_KEY", "test-admin-key")
+    monkeypatch.setenv("AGENT_ISOLATION", "none")
     db.create_tables()
 
     # fake VMs
@@ -67,7 +69,7 @@ def api(tmp_path, monkeypatch):
         monkeypatch.setattr(
             sdk.Sandbox,
             "create",
-            classmethod(lambda cls: original_create(cls, api="http://testserver")),
+            classmethod(lambda cls, token=None: original_create(cls, api="http://testserver", token=token)),
         )
         monkeypatch.setattr(chat, "POLL_SECONDS", 0.05)
         yield

@@ -7,20 +7,23 @@ import pytest
 from fastapi.testclient import TestClient
 
 import node_agent
-from api import db
+from api import auth, db
 from api.main import app
 from api.models import CreateSandboxResponse, EventType, SandboxState, TurnState
 from runner import runner
 
 
 ID_PATTERN = re.compile(r"sbx_[0-9a-f]{32}")
+ADMIN_KEY = "test-admin-key"
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    """Calls the API with the admin key, like the chat app does."""
     monkeypatch.setenv("SBX_DB", str(tmp_path / "state.db"))
+    monkeypatch.setenv("SANDBOX_ADMIN_KEY", ADMIN_KEY)
     db.create_tables()
-    with TestClient(app) as test_client:
+    with TestClient(app, headers={"Authorization": f"Bearer {ADMIN_KEY}"}) as test_client:
         yield test_client
 
 
@@ -836,3 +839,89 @@ def test_each_sandbox_counts_its_own_seq(client):
 
     assert first_seqs == [1, 2]
     assert second_seq == 1
+
+
+# ---------------------------------------------------------------------------
+# Auth (2f)
+# ---------------------------------------------------------------------------
+
+def no_key(client) -> dict:
+    """Headers that replace the admin key with nothing."""
+    return {"Authorization": ""}
+
+
+def bearer(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_no_key_is_unauthorized(client):
+    response = client.get("/sandboxes", headers=no_key(client))
+
+    assert response.status_code == 401
+
+
+def test_a_wrong_key_is_unauthorized(client):
+    response = client.get("/sandboxes", headers=bearer("not-the-key"))
+
+    assert response.status_code == 401
+
+
+def test_a_turn_token_can_exec_and_use_files_on_its_own_sandbox(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    monkeypatch.setattr(node_agent, "exec", scripted_exec([], {"exit_code": 0, "stdout": "", "stderr": "", "timed_out": False}))
+    monkeypatch.setattr(node_agent, "read_file", lambda sandbox_id, path: "hi")
+    monkeypatch.setattr(node_agent, "write_file", lambda sandbox_id, path, content: None)
+    token = auth.new_turn_token(sandbox_id)
+
+    executed = client.post(f"/sandboxes/{sandbox_id}/exec", json={"cmd": "true"}, headers=bearer(token))
+    written = client.put(f"/sandboxes/{sandbox_id}/files", params={"path": "/root/a"}, content=b"hi", headers=bearer(token))
+    read = client.get(f"/sandboxes/{sandbox_id}/files", params={"path": "/root/a"}, headers=bearer(token))
+
+    assert [executed.status_code, written.status_code, read.status_code] == [200, 200, 200]
+
+
+def test_a_turn_token_cannot_touch_another_sandbox(client, monkeypatch):
+    own_id = make_running_sandbox(client, monkeypatch)
+    other_id = "sbx_" + "b" * 32
+    token = auth.new_turn_token(own_id)
+
+    executed = client.post(f"/sandboxes/{other_id}/exec", json={"cmd": "true"}, headers=bearer(token))
+    read = client.get(f"/sandboxes/{other_id}/files", params={"path": "/root/a"}, headers=bearer(token))
+
+    assert executed.status_code == 403
+    assert read.status_code == 403
+
+
+def test_a_turn_token_cannot_call_admin_routes(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    token = auth.new_turn_token(sandbox_id)
+
+    responses = [
+        client.delete(f"/sandboxes/{sandbox_id}", headers=bearer(token)),
+        client.get("/sandboxes", headers=bearer(token)),
+        client.post("/sandboxes", headers=bearer(token)),
+        client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": "hi"}, headers=bearer(token)),
+        client.get(f"/sandboxes/{sandbox_id}/events", headers=bearer(token)),
+    ]
+
+    assert [response.status_code for response in responses] == [403] * 5
+    assert db.get_sandbox(sandbox_id).state == SandboxState.RUNNING
+
+
+def test_a_dropped_turn_token_stops_working(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    token = auth.new_turn_token(sandbox_id)
+    auth.drop_turn_token(token)
+
+    response = client.post(f"/sandboxes/{sandbox_id}/exec", json={"cmd": "true"}, headers=bearer(token))
+
+    assert response.status_code == 401
+
+
+def test_the_server_refuses_to_start_without_an_admin_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("SBX_DB", str(tmp_path / "state.db"))
+    monkeypatch.delenv("SANDBOX_ADMIN_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="SANDBOX_ADMIN_KEY"):
+        with TestClient(app):
+            pass

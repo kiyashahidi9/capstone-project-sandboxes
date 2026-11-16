@@ -1,15 +1,18 @@
 """
 The thin chat app (Build Plan 2g)
 no agent and no AI key here: the agent runs on the host, and this app only sends messages and shows events
+needs SANDBOX_ADMIN_KEY in .env (the same value as on the host)
 run from sbx/:
     uv run python -m client.client
 """
 
 ## IMPORTS ##
 
+import os
+import sys
 import time
 
-from sdk.sandbox import Sandbox, SandboxError
+from sdk.sandbox import Sandbox, SandboxError   # also loads .env
 
 
 ## CONFIG ##
@@ -76,7 +79,11 @@ def main() -> None:
     sends each message to the agent on the host and shows its progress, until /quit
     destroys the sandbox on exit
     """
-    sandbox = Sandbox.create()
+    admin_key = os.environ.get("SANDBOX_ADMIN_KEY")
+    if not admin_key:
+        sys.exit("SANDBOX_ADMIN_KEY is not set; add it to .env (the same value as on the host)")
+
+    sandbox = Sandbox.create(token=admin_key)
     print(f"sandbox {sandbox.id} ready")
 
     last_seq = 0   # the newest event already shown

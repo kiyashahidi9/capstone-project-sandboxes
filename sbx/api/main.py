@@ -4,12 +4,13 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 
 import node_agent
 from api import db
+from api.auth import require_admin, require_admin_key_set, require_admin_or_turn
 from api.helpers import (
     HTTP_ACCEPTED,
     HTTP_CREATED,
@@ -44,8 +45,12 @@ from api.models import (
 from runner import runner
 
 
-# AGENT_CMD, AGENT_TURN_TIMEOUT and the AI key come from .env at the repo root
+# AGENT_CMD, AGENT_TURN_TIMEOUT, SANDBOX_ADMIN_KEY and the AI key come from .env at the repo root
 load_dotenv()
+
+# who may call each route (api/auth.py)
+ADMIN_ONLY = Depends(require_admin)
+ADMIN_OR_TURN = Depends(require_admin_or_turn)   # exec and files: also the turn's own agent
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +60,7 @@ load_dotenv()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Gets the database ready and ends turns a crash cut off, before taking requests."""
+    require_admin_key_set()
     db.create_tables()
     runner.recover_interrupted_turns()
     yield
@@ -67,7 +73,12 @@ app = FastAPI(title="sbx", lifespan=lifespan)
 # Endpoints: sandboxes
 # ---------------------------------------------------------------------------
 
-@app.post("/sandboxes", status_code=HTTP_CREATED, response_model=CreateSandboxResponse)
+@app.post(
+    "/sandboxes",
+    status_code=HTTP_CREATED,
+    response_model=CreateSandboxResponse,
+    dependencies=[ADMIN_ONLY],
+)
 def create_sandbox() -> CreateSandboxResponse:
     """Makes a brand-new sandbox and tells the client how to reach it."""
     sandbox_id = node_agent.new_sandbox_id()
@@ -77,20 +88,20 @@ def create_sandbox() -> CreateSandboxResponse:
     return build_create_response(sandbox_id, sandbox.boot_seconds)
 
 
-@app.get("/sandboxes", response_model=SandboxListResponse)
+@app.get("/sandboxes", response_model=SandboxListResponse, dependencies=[ADMIN_ONLY])
 def list_sandboxes() -> SandboxListResponse:
     """Shows every sandbox ever made, destroyed ones included, oldest first."""
     rows = db.list_sandboxes()
     return SandboxListResponse(sandboxes=[SandboxInfo.from_row(row) for row in rows])
 
 
-@app.get("/sandboxes/{sandbox_id}", response_model=SandboxInfo)
+@app.get("/sandboxes/{sandbox_id}", response_model=SandboxInfo, dependencies=[ADMIN_ONLY])
 def get_sandbox(sandbox_id: str) -> SandboxInfo:
     """Shows one sandbox's details."""
     return SandboxInfo.from_row(require_sandbox(sandbox_id))
 
 
-@app.delete("/sandboxes/{sandbox_id}")
+@app.delete("/sandboxes/{sandbox_id}", dependencies=[ADMIN_ONLY])
 def delete_sandbox(sandbox_id: str) -> dict[str, bool]:
     """Shuts a sandbox down for good; asking twice is harmless."""
     row = require_sandbox(sandbox_id)
@@ -108,6 +119,7 @@ def delete_sandbox(sandbox_id: str) -> dict[str, bool]:
 @app.post(
     "/sandboxes/{sandbox_id}/exec",
     response_model=ExecuteResponse | ExecuteBackgroundResponse,
+    dependencies=[ADMIN_OR_TURN],
 )
 def exec_command(sandbox_id: str, request: ExecuteRequest) -> ExecuteResponse | ExecuteBackgroundResponse:
     """Runs a shell command in the sandbox for the client."""
@@ -118,14 +130,14 @@ def exec_command(sandbox_id: str, request: ExecuteRequest) -> ExecuteResponse | 
     return to_execute_response(result)
 
 
-@app.get("/sandboxes/{sandbox_id}/files", response_class=PlainTextResponse)
+@app.get("/sandboxes/{sandbox_id}/files", response_class=PlainTextResponse, dependencies=[ADMIN_OR_TURN])
 def read_file(sandbox_id: str, path: str) -> str:
     """Sends the client a file's contents from inside the sandbox as plain text."""
     require_running(sandbox_id)
     return fetch_file(sandbox_id, path)
 
 
-@app.put("/sandboxes/{sandbox_id}/files")
+@app.put("/sandboxes/{sandbox_id}/files", dependencies=[ADMIN_OR_TURN])
 async def write_file(sandbox_id: str, path: str, request: Request) -> dict[str, bool]:
     """Saves the uploaded text to a file inside the sandbox."""
     require_running(sandbox_id)
@@ -142,6 +154,7 @@ async def write_file(sandbox_id: str, path: str, request: Request) -> dict[str, 
     "/sandboxes/{sandbox_id}/messages",
     status_code=HTTP_ACCEPTED,
     response_model=MessageResponse,
+    dependencies=[ADMIN_ONLY],
 )
 def send_message(sandbox_id: str, request: MessageRequest) -> MessageResponse:
     """
@@ -158,7 +171,7 @@ def send_message(sandbox_id: str, request: MessageRequest) -> MessageResponse:
     return MessageResponse(seq=seq)
 
 
-@app.get("/sandboxes/{sandbox_id}/events", response_model=EventListResponse)
+@app.get("/sandboxes/{sandbox_id}/events", response_model=EventListResponse, dependencies=[ADMIN_ONLY])
 def list_events(sandbox_id: str, after: int = Query(default=0, ge=0)) -> EventListResponse:
     """Shows every event after seq `after`, oldest first; works for destroyed sandboxes too."""
     require_sandbox(sandbox_id)

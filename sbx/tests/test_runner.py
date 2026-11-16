@@ -1,3 +1,4 @@
+import os
 import shlex
 import sys
 import threading
@@ -6,7 +7,7 @@ import time
 import pytest
 
 import locks
-from api import db
+from api import auth, db
 from api.models import EventType, SandboxState, TurnState
 from runner import runner
 
@@ -59,6 +60,7 @@ print("secret: " + str(os.environ.get("NOT_FOR_AGENTS")))
 def database(tmp_path, monkeypatch):
     """A fresh state.db with one running sandbox."""
     monkeypatch.setenv("SBX_DB", str(tmp_path / "state.db"))
+    monkeypatch.setenv("AGENT_ISOLATION", "none")   # no systemd here; tests/test_runner.py checks its command separately
     db.create_tables()
     db.insert_sandbox(SANDBOX_ID)
     db.set_state(SANDBOX_ID, SandboxState.RUNNING)
@@ -238,3 +240,75 @@ def test_startup_ends_turns_a_crash_cut_off():
     assert events() == [(EventType.TURN_FAILED, {"reason": "server restarted"})]
     assert db.get_sandbox(SANDBOX_ID).turn_state == TurnState.IDLE
     assert db.list_events(idle_id) == []
+
+
+## LOCKDOWN (2f) ##
+
+SHOWS_TOKEN = """
+import os
+print(os.environ["SANDBOX_TOKEN"])
+print(os.environ.get("SANDBOX_ADMIN_KEY"))
+"""
+
+
+def test_each_turn_gets_its_own_token_that_ends_with_the_turn(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, SHOWS_TOKEN)
+    monkeypatch.setenv("SANDBOX_ADMIN_KEY", "the-admin-key")
+    send()
+    runner.run_turn(SANDBOX_ID)
+    send()
+    runner.run_turn(SANDBOX_ID)
+
+    printed = [data["text"] for kind, data in events() if kind == EventType.AGENT_OUTPUT]
+    first_token, first_admin, second_token, second_admin = printed
+    assert first_token and second_token and first_token != second_token
+    assert first_admin == second_admin == "None"    # the agent never sees the admin key
+    assert auth.sandbox_for_turn_token(first_token) is None
+    assert auth.sandbox_for_turn_token(second_token) is None
+
+
+def test_the_systemd_command_locks_the_agent_down(monkeypatch):
+    monkeypatch.setenv("AGENT_TURN_TIMEOUT", "1800")
+
+    command = runner.systemd_command("sbx-turn-x", "/var/lib/sbx-turns/env-1.env", ["python", "/opt/agents/agent.py"])
+
+    assert command[0] == "systemd-run"
+    assert {"--wait", "--pipe", "--collect", "--uid=sbx-agent"} <= set(command)
+    properties = {command[i + 1] for i, part in enumerate(command) if part == "-p"}
+    assert {
+        "NoNewPrivileges=yes",
+        "ProtectSystem=strict",
+        "ProtectHome=yes",
+        "PrivateTmp=yes",
+        "PrivateDevices=yes",
+        "MemoryMax=2G",
+        "CPUQuota=100%",
+        "TasksMax=256",
+        "IPAddressDeny=169.254.169.254",
+        "RuntimeMaxSec=1830",
+        "EnvironmentFile=/var/lib/sbx-turns/env-1.env",
+    } <= properties
+    assert command[-2:] == ["python", "/opt/agents/agent.py"]
+
+
+def test_secrets_go_in_the_environment_file_not_the_command_line(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_ISOLATION", "none")   # so turn_file uses the temp folder
+    path = runner.write_environment_file({"OPENAI_API_KEY": "sk-secret", "SANDBOX_TOKEN": "tok"})
+
+    try:
+        command = runner.systemd_command("unit", path, ["agent"])
+        with open(path, encoding="utf-8") as file:
+            lines = file.read().splitlines()
+    finally:
+        os.remove(path)
+
+    assert lines == ["OPENAI_API_KEY=sk-secret", "SANDBOX_TOKEN=tok"]
+    assert not any("sk-secret" in part or "tok" == part for part in command)
+
+
+def test_lockdown_is_on_unless_turned_off(monkeypatch):
+    monkeypatch.delenv("AGENT_ISOLATION", raising=False)
+    assert runner.locked_down()
+
+    monkeypatch.setenv("AGENT_ISOLATION", "none")
+    assert not runner.locked_down()

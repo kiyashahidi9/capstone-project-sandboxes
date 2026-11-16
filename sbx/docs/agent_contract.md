@@ -9,7 +9,7 @@ How to hand us your agent. Your agent is a **command**. We run it once for each 
 | **How it works on the sandbox** | Our SDK (`sdk/sandbox.py`) or plain HTTP to `SANDBOX_API` with `Authorization: Bearer $SANDBOX_TOKEN`. Only the exec and files routes, and only for its own sandbox |
 | **How it reports progress** | Every line it prints on **stdout** becomes an event the user sees |
 | **How it ends a turn** | It exits. Exit code `0` = finished; anything else = failed (we save the last 50 lines of stderr) |
-| **Limits** | 30 min per turn, 2 GB memory, no root, no access to the host's files |
+| **Limits** | 30 min per turn, 2 GB memory, one CPU, no root, no access to the host's files. It runs as `sbx-agent` with a read-only filesystem and its own private `/tmp`. Do real work in the sandbox, not on the host |
 
 ## Environment
 
@@ -17,7 +17,7 @@ How to hand us your agent. Your agent is a **command**. We run it once for each 
 |----------|-------|
 | `SANDBOX_ID` | The sandbox to work in, e.g. `sbx_58e4...` |
 | `SANDBOX_API` | `http://127.0.0.1:8000` |
-| `SANDBOX_TOKEN` | A token that only works for this sandbox, for this turn |
+| `SANDBOX_TOKEN` | A token that only works for exec and files on this sandbox, and only during this turn. Anything else gets 403 |
 | `SANDBOX_HISTORY` | Path to a JSON file of earlier events (below) |
 | `OPENAI_API_KEY` | The AI key from the host's `.env` |
 

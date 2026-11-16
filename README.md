@@ -115,13 +115,19 @@ This takes a few minutes. It:
 
 and ends with a checklist. Every line should show `[x]`. It's safe to rerun. To rebuild the base image from scratch, run `sudo scripts/setup_host.sh --rebuild-rootfs`.
 
-#### 5. Add the host's `.env` (on the VM)
+#### 5. Add the host's `.env` and lock the agent down (on the VM)
 
 The agent runs on the host, so the AI key lives there. From the repo root:
 
 ```bash
-cp .env.example .env          # then set OPENAI_API_KEY=...; keep AGENT_CMD as it is
+cp .env.example .env          # then set SANDBOX_ADMIN_KEY and OPENAI_API_KEY; keep AGENT_CMD as it is
+cd sbx
+sudo scripts/setup_agents.sh  # every checklist line should show [x]
 ```
+
+Make the admin key with `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` and share it with your teammates. Every API request needs it.
+
+`setup_agents.sh` creates the `sbx-agent` user, installs the agent in `/opt/agents`, and makes `.env` root only, so edit it with `sudo nano ../.env` afterwards. Rerun it after `setup_host.sh` (which hands `.env` back to you) and after changing the agent.
 
 #### 6. Start the API server (on the VM)
 
@@ -131,11 +137,11 @@ From `sbx/`:
 sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Leave it running. Check it from a second terminal on the VM with `curl http://localhost:8000/sandboxes`, which should return `[]`. For more detail, see [Start the API server](#start-the-api-server).
+Leave it running. Check it from a second terminal on the VM with `curl -H "Authorization: Bearer <admin key>" http://localhost:8000/sandboxes`, which should return `{"sandboxes":[]}`. For more detail, see [Start the API server](#start-the-api-server).
 
 #### Updating a host that ran Milestone 1
 
-Pull `track-a`, do step 5, and add the new column to the existing database once, before starting the server. Otherwise every sandbox request fails:
+Pull `track-a`, do step 5 (fill in the new `.env` lines), and add the new column to the existing database once, before starting the server. Otherwise every sandbox request fails:
 
 ```bash
 git fetch && git checkout track-a && git pull
@@ -158,8 +164,8 @@ The SDK and agents talk to the API server running on the GCP VM (see [Start the 
 ```bash
 # install uv if you don't have it: https://docs.astral.sh/uv/getting-started/installation/
 
-# optional (at the repo root): the chat app needs no OpenAI key; .env only overrides SANDBOX_API,
-# which defaults to http://localhost:8000, the local end of the tunnel
+# at the repo root: set SANDBOX_ADMIN_KEY to the same value as on the VM (no OpenAI key needed).
+# SANDBOX_API defaults to http://localhost:8000, the local end of the tunnel
 cp .env.example .env
 
 # run every command below from sbx/
@@ -171,13 +177,13 @@ uv sync
 # terminal 2: forward localhost:8000 to the API on the VM (unless VS code remote does it already)
 gcloud compute ssh sbx-node-1 --zone=us-east1-b -- -N -L 8000:localhost:8000
 
-# check the API is reachable
-curl http://localhost:8000/sandboxes
+# check the API is reachable (Git Bash or macOS/Linux)
+curl -H "Authorization: Bearer <admin key>" http://localhost:8000/sandboxes
 ```
 
 ### Using the client agent
 
-The client is a thin chat app. It creates one sandbox and keeps it for the session. Each message goes to the API, which runs the agent **on the host** (`AGENT_CMD` in the host's `.env`), and the app prints the agent's progress as it comes in. It needs the API server running on the VM and the SSH tunnel open.
+The client is a thin chat app. It creates one sandbox and keeps it for the session. Each message goes to the API, which runs the agent **on the host** (`AGENT_CMD` in the host's `.env`), and the app prints the agent's progress as it comes in. It needs the API server running on the VM, the SSH tunnel open, and `SANDBOX_ADMIN_KEY` in your `.env`.
 
 Start it from `sbx/`:
 
@@ -403,6 +409,8 @@ The API server acts as the entry point for clients and AI agents to interact wit
 **Execution environment:** The API server runs as root on the Linux host to access the Node Agent's privileged operations.
 
 ### REST API endpoints
+
+> Since Milestone 2 (2f), every request needs `-H "Authorization: Bearer <admin key>"`. The `curl` examples in this section predate that. See [TRACK_A.md](TRACK_A.md).
 
 **File:** `api/main.py`
 

@@ -2,7 +2,12 @@ import os
 import httpx
 from dotenv import load_dotenv
 
-load_dotenv()   # read .env from the repo root (shell variables still win)
+# read .env from the repo root (shell variables still win);
+# a locked-down agent can't read it (2f) and gets its settings from the environment instead
+try:
+    load_dotenv()
+except OSError:
+    pass
 
 DEFAULT_API = os.environ.get("SANDBOX_API", "http://localhost:8000")
 
