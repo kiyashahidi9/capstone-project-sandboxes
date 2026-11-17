@@ -6,13 +6,12 @@ from datetime import datetime, timedelta, timezone
 
 from pydantic import AwareDatetime
 
-from control.mocks import FakeNodeAgent
 from control.sampler import poll
 from control.types import VmSample
 
 
 def replay(
-    provider: FakeNodeAgent,
+    samples: list[VmSample],
     start: AwareDatetime,
     end: AwareDatetime,
     interval: timedelta,
@@ -36,6 +35,6 @@ def replay(
     readings: list[VmSample | None] = []
     cursor: AwareDatetime = start
     while cursor <= end:
-        readings.append(poll(provider, cursor))
+        readings.append(poll(samples, cursor))
         cursor: AwareDatetime = cursor + interval
     return readings

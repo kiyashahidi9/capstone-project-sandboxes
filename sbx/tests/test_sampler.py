@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from control.mocks import FakeNodeAgent
 from control.sampler import poll
 from tools.replay import replay
 from control.types import Policy, SessionFixture, VmSample, VmState
@@ -21,8 +20,8 @@ def session() -> SessionFixture:
 
 
 @pytest.fixture
-def agent(session) -> FakeNodeAgent:
-    return FakeNodeAgent.from_session(session)
+def agent(session) -> list[VmSample]:
+    return list(session.vm_metrics)
 
 
 def test_poll_returns_the_sample_recorded_at_that_time(session, agent):
@@ -93,7 +92,7 @@ def test_poll_does_not_fill_a_gap():
         _sample(start, cpu_percent=10.0),
         _sample(start + timedelta(seconds=10), cpu_percent=1.0),
     ]
-    agent = FakeNodeAgent(samples)
+    agent = samples
 
     assert poll(agent, start + timedelta(seconds=5)) is None
     assert poll(agent, start).cpu_percent == 10.0
@@ -101,7 +100,7 @@ def test_poll_does_not_fill_a_gap():
 
 
 def test_poll_returns_none_for_an_empty_provider():
-    agent = FakeNodeAgent([])
+    agent = []
     assert poll(agent, datetime(2026, 11, 16, 15, 0, 0, tzinfo=UTC)) is None
 
 
@@ -109,7 +108,7 @@ def test_poll_keeps_a_zero_cpu_reading():
     """CPU at 0% and zero network deltas are a real sample."""
     instant = datetime(2026, 11, 16, 15, 0, 0, tzinfo=UTC)
     sample = _sample(instant, cpu_percent=0.0)
-    agent = FakeNodeAgent([sample])
+    agent = [sample]
 
     assert poll(agent, instant) == sample
 
@@ -117,7 +116,7 @@ def test_poll_keeps_a_zero_cpu_reading():
 def test_poll_passes_through_a_paused_vm_state():
     instant = datetime(2026, 11, 16, 15, 0, 0, tzinfo=UTC)
     sample = _sample(instant, vm_state=VmState.PAUSED)
-    agent = FakeNodeAgent([sample])
+    agent = [sample]
 
     assert poll(agent, instant).vm_state == VmState.PAUSED
 
@@ -137,7 +136,7 @@ def test_duplicate_timestamp_returns_the_later_sample():
     instant = datetime(2026, 11, 16, 15, 0, 0, tzinfo=UTC)
     first = _sample(instant, cpu_percent=4.0)
     later = _sample(instant, cpu_percent=9.0)
-    agent = FakeNodeAgent([first, later])
+    agent = [first, later]
 
     assert poll(agent, instant) == later
 
@@ -146,15 +145,6 @@ def test_naive_timestamp_is_rejected(agent):
     naive = datetime(2026, 11, 16, 15, 0, 0)
     with pytest.raises(TypeError):
         poll(agent, naive)
-
-
-def test_poll_does_not_record_pause_or_resume(session, agent):
-    start = session.vm_metrics[0].timestamp
-    interval = Policy().sample_interval
-    for i in range(len(session.vm_metrics)):
-        poll(agent, start + (i * interval))
-
-    assert agent.calls == []
 
 
 # Replay. These timestamps are in 2020, so the range stays in the past.
@@ -168,18 +158,17 @@ def test_replay_walks_the_past_and_keeps_missing_steps():
         _sample(PAST, cpu_percent=3.0),
         _sample(PAST + timedelta(seconds=10), cpu_percent=1.0),
     ]
-    agent = FakeNodeAgent(samples)
+    agent = samples
     end = PAST + timedelta(seconds=12)
 
     readings = replay(agent, PAST, end, STEP)
 
     assert readings == [samples[0], None, samples[1]]
-    assert agent.calls == []
 
 
 def test_replay_includes_a_range_that_is_one_instant():
     sample = _sample(PAST, cpu_percent=4.0)
-    agent = FakeNodeAgent([sample])
+    agent = [sample]
 
     assert replay(agent, PAST, PAST, STEP) == [sample]
 
@@ -187,20 +176,20 @@ def test_replay_includes_a_range_that_is_one_instant():
 def test_replay_with_an_interval_longer_than_the_range_returns_the_start():
     sample = _sample(PAST, cpu_percent=4.0)
     later = _sample(PAST + timedelta(seconds=10), cpu_percent=9.0)
-    agent = FakeNodeAgent([sample, later])
+    agent = [sample, later]
 
     assert replay(agent, PAST, PAST + timedelta(seconds=10), timedelta(hours=1)) == [sample]
 
 
 def test_replay_of_an_empty_provider_returns_a_none_per_step():
-    agent = FakeNodeAgent([])
+    agent = []
 
     assert replay(agent, PAST, PAST + (STEP * 2), STEP) == [None, None, None]
 
 
 def test_replay_twice_returns_the_same_readings():
     sample = _sample(PAST, cpu_percent=2.0)
-    agent = FakeNodeAgent([sample])
+    agent = [sample]
 
     first = replay(agent, PAST, PAST, STEP)
     second = replay(agent, PAST, PAST, STEP)
@@ -213,42 +202,42 @@ def test_replay_allows_an_end_equal_to_now():
     """end > now is the future. An end equal to the current time is still allowed."""
     current = datetime.now(UTC)
     sample = _sample(current, cpu_percent=1.0)
-    agent = FakeNodeAgent([sample])
+    agent = [sample]
 
     assert replay(agent, current, current, STEP) == [sample]
 
 
 def test_replay_rejects_an_end_in_the_future():
     current = datetime.now(UTC)
-    agent = FakeNodeAgent([])
+    agent = []
 
     with pytest.raises(ValueError, match="end is in the future"):
         replay(agent, current - STEP, current + STEP, STEP)
 
 
 def test_replay_rejects_a_start_after_the_end():
-    agent = FakeNodeAgent([])
+    agent = []
 
     with pytest.raises(ValueError, match="start is after end"):
         replay(agent, PAST + STEP, PAST, STEP)
 
 
 def test_replay_rejects_a_negative_interval():
-    agent = FakeNodeAgent([])
+    agent = []
 
     with pytest.raises(ValueError, match="interval is negative"):
         replay(agent, PAST, PAST + STEP, timedelta(seconds=-5))
 
 
 def test_replay_rejects_a_zero_interval():
-    agent = FakeNodeAgent([])
+    agent = []
 
     with pytest.raises(ValueError, match="interval is zero"):
         replay(agent, PAST, PAST + STEP, timedelta(0))
 
 
 def test_replay_rejects_a_missing_interval():
-    agent = FakeNodeAgent([])
+    agent = []
 
     with pytest.raises(ValueError, match="interval is None"):
         replay(agent, PAST, PAST + STEP, None)
@@ -257,14 +246,14 @@ def test_replay_rejects_a_missing_interval():
 @pytest.mark.parametrize("interval", [5, "5"])
 def test_replay_rejects_an_interval_that_is_not_a_timedelta(interval):
     """The comment lists this twice. An int and a string are the two non-timedelta inputs."""
-    agent = FakeNodeAgent([])
+    agent = []
 
     with pytest.raises(ValueError, match="interval is not a timedelta"):
         replay(agent, PAST, PAST + STEP, interval)
 
 
 def test_replay_rejects_a_naive_start_or_end():
-    agent = FakeNodeAgent([])
+    agent = []
     naive = datetime(2020, 1, 1)
 
     with pytest.raises(TypeError):

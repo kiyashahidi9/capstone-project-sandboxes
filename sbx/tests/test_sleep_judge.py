@@ -5,7 +5,6 @@ from pathlib import Path
 
 from control.classifier import classify
 from control.decider import decide
-from control.mocks import FakeNodeAgent
 from control.types import Activity, AgentEvent, Decision, EventType, ObservationWindow, Policy, SessionFixture, VmState
 from tools.replay import replay
 
@@ -113,16 +112,14 @@ def test_a_new_user_request_while_paused_resumes() -> None:
 
 def test_replaying_the_fixture_twice_matches() -> None:
     session = _session()
-    agent = FakeNodeAgent.from_session(session)
     start = session.vm_metrics[0].timestamp
     end = session.vm_metrics[-1].timestamp
 
-    first = replay(agent, start, end, POLICY.sample_interval)
-    second = replay(agent, start, end, POLICY.sample_interval)
+    first = replay(session.vm_metrics, start, end, POLICY.sample_interval)
+    second = replay(session.vm_metrics, start, end, POLICY.sample_interval)
 
     assert first == session.vm_metrics
     assert second == first
-    assert agent.calls == []
 
 
 def _session() -> SessionFixture:
