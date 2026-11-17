@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 
 from control.mocks import FakeNodeAgent
-from control.sampler import poll, replay
+from control.sampler import poll
+from tools.replay import replay
 from control.types import Policy, SessionFixture, VmSample, VmState
 
 
