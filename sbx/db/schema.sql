@@ -9,12 +9,17 @@ CREATE TABLE IF NOT EXISTS slots (
 );
 
 -- One row per sandbox the API created; owned by the API server, rows kept after destroy.
+-- SQLite can't change a CHECK in place, so changing the states means rebuilding this table:
+-- rebuild_sandboxes_table() in api/db.py renames the old table, creates this one, copies the rows, drops the old.
+-- It reads this statement from here, so this is the only definition of the table.
 CREATE TABLE IF NOT EXISTS sandboxes (
-    id          TEXT PRIMARY KEY,   -- sbx_<32 hex>, matches slots.sandbox_id
-    state       TEXT NOT NULL CHECK (state IN ('starting', 'running', 'destroyed')),  -- adding a state later means rebuilding this table
-    created_at  INTEGER NOT NULL,   -- unix seconds
-    updated_at  INTEGER NOT NULL,   -- unix seconds, changes with state
-    turn_state  TEXT NOT NULL DEFAULT 'idle' CHECK (turn_state IN ('idle', 'working'))  -- is the agent running a turn right now
+    id            TEXT PRIMARY KEY,   -- sbx_<32 hex>, matches slots.sandbox_id
+    state         TEXT NOT NULL CHECK (state IN ('starting', 'running', 'pausing', 'paused', 'resuming', 'destroyed')),
+    created_at    INTEGER NOT NULL,   -- unix seconds
+    updated_at    INTEGER NOT NULL,   -- unix seconds, changes with state
+    turn_state    TEXT NOT NULL DEFAULT 'idle' CHECK (turn_state IN ('idle', 'working')),  -- is the agent running a turn right now
+    snapshot_dir  TEXT,               -- host folder holding the snapshot; NULL unless paused
+    paused_at     INTEGER             -- unix seconds; NULL unless paused
 );
 
 -- The whole conversation of each sandbox, user messages included; owned by the API server, never edited.

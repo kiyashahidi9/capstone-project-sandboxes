@@ -147,6 +147,7 @@ def test_list_shows_a_running_sandbox(client, monkeypatch):
                 "created_at": created["created_at"],
                 "updated_at": created["updated_at"],
                 "turn_state": "idle",
+                "paused_at": None,
             }
         ]
     }
@@ -199,6 +200,7 @@ def test_get_returns_one_running_sandbox(client, monkeypatch):
         "created_at": created["created_at"],
         "updated_at": created["updated_at"],
         "turn_state": "idle",
+        "paused_at": None,
     }
 
 
@@ -860,6 +862,16 @@ def test_no_key_is_unauthorized(client):
     assert response.status_code == 401
 
 
+def test_pause_and_resume_need_the_admin_key(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+
+    paused = client.post(f"/sandboxes/{sandbox_id}/pause", headers=no_key(client))
+    resumed = client.post(f"/sandboxes/{sandbox_id}/resume", headers=no_key(client))
+
+    assert [paused.status_code, resumed.status_code] == [401, 401]
+    assert db.get_sandbox(sandbox_id).state == SandboxState.RUNNING
+
+
 def test_a_wrong_key_is_unauthorized(client):
     response = client.get("/sandboxes", headers=bearer("not-the-key"))
 
@@ -902,9 +914,11 @@ def test_a_turn_token_cannot_call_admin_routes(client, monkeypatch):
         client.post("/sandboxes", headers=bearer(token)),
         client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": "hi"}, headers=bearer(token)),
         client.get(f"/sandboxes/{sandbox_id}/events", headers=bearer(token)),
+        client.post(f"/sandboxes/{sandbox_id}/pause", headers=bearer(token)),
+        client.post(f"/sandboxes/{sandbox_id}/resume", headers=bearer(token)),
     ]
 
-    assert [response.status_code for response in responses] == [403] * 5
+    assert [response.status_code for response in responses] == [403] * 7
     assert db.get_sandbox(sandbox_id).state == SandboxState.RUNNING
 
 

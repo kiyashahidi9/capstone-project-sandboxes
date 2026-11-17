@@ -22,6 +22,9 @@ class SandboxState(StrEnum):
 
     STARTING = "starting"
     RUNNING = "running"
+    PAUSING = "pausing"
+    PAUSED = "paused"
+    RESUMING = "resuming"
     DESTROYED = "destroyed"
 
 
@@ -57,6 +60,8 @@ class SandboxRow(BaseModel):
     created_at: int                 # unix seconds
     updated_at: int                 # unix seconds
     turn_state: TurnState = TurnState.IDLE
+    snapshot_dir: str | None = None # host folder holding the snapshot; None unless paused
+    paused_at: int | None = None    # unix seconds; None unless paused
     n: int | None = None            # network slot; None when it holds none
 
 
@@ -73,6 +78,7 @@ class SandboxInfo(BaseModel):
     created_at: int                 # unix seconds
     updated_at: int                 # unix seconds
     turn_state: TurnState           # working while the agent runs a turn
+    paused_at: int | None = None    # unix seconds; None unless paused
 
     @classmethod
     def from_row(cls, row: SandboxRow) -> SandboxInfo:
@@ -84,6 +90,7 @@ class SandboxInfo(BaseModel):
             created_at=row.created_at,
             updated_at=row.updated_at,
             turn_state=row.turn_state,
+            paused_at=row.paused_at,
         )
 
 

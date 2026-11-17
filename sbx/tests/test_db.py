@@ -54,6 +54,160 @@ def test_create_tables_is_safe_to_run_twice():
     db.create_tables()
 
 
+OLD_SANDBOXES_TABLE = """
+CREATE TABLE sandboxes (
+    id          TEXT PRIMARY KEY,
+    state       TEXT NOT NULL CHECK (state IN ('starting', 'running', 'destroyed')),
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+"""
+
+
+def use_old_sandboxes_table(rows):
+    """Swaps in the pre-4c sandboxes table holding the given (id, state, created_at, updated_at) rows."""
+    with closing(db.connect()) as conn:
+        conn.execute("DROP TABLE sandboxes")
+        conn.execute(OLD_SANDBOXES_TABLE)
+        conn.executemany("INSERT INTO sandboxes VALUES (?, ?, ?, ?)", rows)
+
+
+def table_sql(table):
+    """Gives a table's definition as stored in the state database."""
+    with closing(db.connect()) as conn:
+        (sql,) = conn.execute("SELECT sql FROM sqlite_master WHERE name = ?", (table,)).fetchone()
+    return sql
+
+
+def test_rebuilt_table_is_the_one_in_schema_file():
+    fresh = table_sql("sandboxes")
+    use_old_sandboxes_table([])
+
+    db.create_tables()
+
+    assert table_sql("sandboxes") == fresh
+
+
+def test_rebuild_leaves_no_temporary_table():
+    use_old_sandboxes_table([(ID_A, "running", 1000, 1000)])
+
+    db.create_tables()
+
+    with closing(db.connect()) as conn:
+        names = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "sandboxes_old" not in names
+
+
+def test_create_tables_rebuilds_an_old_table_and_keeps_its_rows():
+    use_old_sandboxes_table([(ID_A, "running", 1000, 1001), (ID_B, "destroyed", 1002, 1003)])
+
+    db.create_tables()
+
+    rows = db.list_sandboxes()
+    assert [(r.id, r.state, r.created_at, r.updated_at) for r in rows] == [
+        (ID_A, SandboxState.RUNNING, 1000, 1001),
+        (ID_B, SandboxState.DESTROYED, 1002, 1003),
+    ]
+    assert all(r.snapshot_dir is None and r.paused_at is None for r in rows)
+
+
+def test_create_tables_after_a_rebuild_changes_nothing():
+    use_old_sandboxes_table([(ID_A, "running", 1000, 1001)])
+    db.create_tables()
+    db.transition(ID_A, [SandboxState.RUNNING], SandboxState.PAUSED, snapshot_dir="/snap", paused_at=1002)
+    before = (table_sql("sandboxes"), db.list_sandboxes())
+
+    db.create_tables()
+
+    assert (table_sql("sandboxes"), db.list_sandboxes()) == before
+
+
+# --- merging with another branch's columns ----------------------------------
+
+TRACK_A_TABLE = """
+CREATE TABLE sandboxes (
+    id          TEXT PRIMARY KEY,
+    state       TEXT NOT NULL CHECK (state IN ('starting', 'running', 'destroyed')),
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    turn_state  TEXT NOT NULL DEFAULT 'idle'
+);
+"""
+
+
+TRACK_C_TABLE = """
+CREATE TABLE sandboxes (
+    id            TEXT PRIMARY KEY,
+    state         TEXT NOT NULL CHECK (state IN ('starting', 'running', 'pausing', 'paused', 'resuming', 'destroyed')),
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    snapshot_dir  TEXT,
+    paused_at     INTEGER
+);
+"""
+
+
+def use_sandboxes_table(create_sql: str, insert_sql: str) -> None:
+    """Swaps in a sandboxes table as an older branch made it, with one row."""
+    with closing(db.connect()) as conn:
+        conn.execute("DROP TABLE sandboxes")
+        conn.execute(create_sql)
+        conn.execute(insert_sql, (ID_A,))
+
+
+def column_values(column):
+    """Gives one column's value for every sandbox, by id."""
+    with closing(db.connect()) as conn:
+        return dict(conn.execute(f"SELECT id, {column} FROM sandboxes").fetchall())
+
+
+def test_merge_keeps_track_a_column_values():
+    # a database made by Track A's branch alone: turn_state, none of the pause states or columns
+    use_sandboxes_table(TRACK_A_TABLE, "INSERT INTO sandboxes VALUES (?, 'running', 1000, 1000, 'working')")
+
+    db.create_tables()
+
+    assert column_values("turn_state") == {ID_A: "working"}
+    assert db.set_state(ID_A, SandboxState.PAUSED) is True   # 4c's states work too
+
+
+def test_merge_keeps_track_c_column_values():
+    # a database made by Track C's branch alone: 4c columns, no turn_state yet
+    use_sandboxes_table(TRACK_C_TABLE, "INSERT INTO sandboxes VALUES (?, 'paused', 1000, 1001, '/snap', 1002)")
+
+    db.create_tables()
+
+    row = db.get_sandbox(ID_A)
+    assert (row.state, row.snapshot_dir, row.paused_at) == (SandboxState.PAUSED, "/snap", 1002)
+    assert column_values("turn_state") == {ID_A: "idle"}      # new column starts at its default
+
+
+def test_comment_only_change_to_schema_does_not_rebuild(tmp_path, monkeypatch):
+    before = table_sql("sandboxes")
+    path = tmp_path / "schema.sql"
+    path.write_text(db.SCHEMA_PATH.read_text().replace("-- unix seconds; NULL unless paused", "-- reworded"))
+    monkeypatch.setattr(db, "SCHEMA_PATH", path)
+
+    db.create_tables()
+
+    assert table_sql("sandboxes") == before   # still the old text, so no rebuild ran
+
+
+def test_rebuilt_table_accepts_the_pause_states():
+    use_old_sandboxes_table([(ID_A, "running", 1000, 1000)])
+    db.create_tables()
+
+    for state in (SandboxState.PAUSING, SandboxState.PAUSED, SandboxState.RESUMING):
+        assert db.set_state(ID_A, state) is True
+        assert db.get_sandbox(ID_A).state == state
+
+
+def test_table_still_rejects_unknown_states():
+    db.insert_sandbox(ID_A)
+    with closing(db.connect()) as conn, pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE sandboxes SET state = 'sleeping' WHERE id = ?", (ID_A,))
+
+
 def test_connections_use_wal_mode():
     with closing(db.connect()) as conn:
         (mode,) = conn.execute("PRAGMA journal_mode").fetchone()
@@ -86,6 +240,72 @@ def test_set_state_changes_state_and_updated_at_only(clock):
 
 def test_set_state_on_unknown_sandbox_returns_false():
     assert db.set_state(ID_A, SandboxState.RUNNING) is False
+
+
+def make_sandbox(sandbox_id, state):
+    """Records a sandbox and moves it straight to the given state."""
+    db.insert_sandbox(sandbox_id)
+    db.set_state(sandbox_id, state)
+
+
+def test_transition_from_an_allowed_state_changes_it(clock):
+    make_sandbox(ID_A, SandboxState.RUNNING)
+    clock["now"] = 1005
+
+    assert db.transition(ID_A, [SandboxState.RUNNING], SandboxState.PAUSING) is True
+
+    row = db.get_sandbox(ID_A)
+    assert row.state == SandboxState.PAUSING
+    assert row.updated_at == 1005
+
+
+def test_transition_from_a_wrong_state_changes_nothing(clock):
+    make_sandbox(ID_A, SandboxState.PAUSED)
+    clock["now"] = 1005
+
+    assert db.transition(ID_A, [SandboxState.RUNNING], SandboxState.PAUSING) is False
+
+    row = db.get_sandbox(ID_A)
+    assert row.state == SandboxState.PAUSED
+    assert row.updated_at == 1000
+
+
+def test_transition_accepts_any_of_several_from_states():
+    make_sandbox(ID_A, SandboxState.PAUSED)
+    assert db.transition(ID_A, [SandboxState.RUNNING, SandboxState.PAUSED], SandboxState.DESTROYED) is True
+    assert db.get_sandbox(ID_A).state == SandboxState.DESTROYED
+
+
+def test_transition_on_unknown_sandbox_returns_false():
+    assert db.transition(ID_A, [SandboxState.RUNNING], SandboxState.PAUSING) is False
+
+
+def test_only_the_first_of_two_identical_transitions_wins():
+    make_sandbox(ID_A, SandboxState.RUNNING)
+    assert db.transition(ID_A, [SandboxState.RUNNING], SandboxState.PAUSING) is True
+    assert db.transition(ID_A, [SandboxState.RUNNING], SandboxState.PAUSING) is False
+
+
+def test_transition_sets_and_clears_the_pause_fields(clock):
+    make_sandbox(ID_A, SandboxState.PAUSING)
+
+    db.transition(ID_A, [SandboxState.PAUSING], SandboxState.PAUSED, snapshot_dir="/var/sbx/x/snap", paused_at=1000)
+    paused = db.get_sandbox(ID_A)
+    db.transition(ID_A, [SandboxState.PAUSED], SandboxState.RESUMING)
+    resuming = db.get_sandbox(ID_A)
+    db.transition(ID_A, [SandboxState.RESUMING], SandboxState.RUNNING, snapshot_dir=None, paused_at=None)
+    running = db.get_sandbox(ID_A)
+
+    assert (paused.snapshot_dir, paused.paused_at) == ("/var/sbx/x/snap", 1000)
+    assert (resuming.snapshot_dir, resuming.paused_at) == ("/var/sbx/x/snap", 1000)   # fields not given are kept
+    assert (running.snapshot_dir, running.paused_at) == (None, None)
+
+
+def test_transition_rejects_a_field_it_does_not_know():
+    make_sandbox(ID_A, SandboxState.RUNNING)
+    with pytest.raises(ValueError):
+        db.transition(ID_A, [SandboxState.RUNNING], SandboxState.PAUSING, created_at=0)
+    assert db.get_sandbox(ID_A).state == SandboxState.RUNNING
 
 
 # --- reads ------------------------------------------------------------------

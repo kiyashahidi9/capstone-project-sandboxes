@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 from contextlib import closing
@@ -16,7 +17,8 @@ DB_BUSY_TIMEOUT = 5.0             # seconds a writer waits for another writer be
 
 # Sandboxes joined to slots; LEFT JOIN keeps sandboxes that hold no slot (their n is NULL).
 SELECT_SANDBOXES = """
-    SELECT sandboxes.id, sandboxes.state, sandboxes.created_at, sandboxes.updated_at, sandboxes.turn_state, slots.n
+    SELECT sandboxes.id, sandboxes.state, sandboxes.created_at, sandboxes.updated_at,
+           sandboxes.turn_state, sandboxes.snapshot_dir, sandboxes.paused_at, slots.n
     FROM sandboxes
     LEFT JOIN slots ON slots.sandbox_id = sandboxes.id
 """
@@ -49,6 +51,65 @@ def create_tables() -> None:
     make_db_folder()
     with closing(connect()) as conn:
         conn.executescript(SCHEMA_PATH.read_text())
+        rebuild_sandboxes_table(conn)
+
+
+def sandboxes_table_from_schema() -> str:
+    """Gives the CREATE TABLE statement for sandboxes from db/schema.sql, so the table is defined in one place."""
+    with closing(sqlite3.connect(":memory:")) as scratch:
+        scratch.executescript(SCHEMA_PATH.read_text())
+        (sql,) = scratch.execute("SELECT sql FROM sqlite_master WHERE name = 'sandboxes'").fetchone()
+    return sql   # SQLite stores it without "IF NOT EXISTS", so it always creates the table
+
+
+def comparable_sql(sql: str) -> str:
+    """Drops comments and extra spacing, so only real changes to a table count as different."""
+    without_comments = re.sub(r"--[^\n]*", "", sql)
+    return " ".join(without_comments.split())
+
+
+def live_sandboxes_table(conn: sqlite3.Connection) -> str:
+    """Gives the CREATE TABLE statement the database's sandboxes table was made with."""
+    (sql,) = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'sandboxes'").fetchone()
+    return sql
+
+
+def column_names(conn: sqlite3.Connection, table: str) -> list[str]:
+    """Lists a table's columns in order."""
+    return [row["name"] for row in conn.execute(f"PRAGMA table_info({table})")]
+
+
+def shared_columns(conn: sqlite3.Connection, old_table: str, new_table: str) -> list[str]:
+    """Lists the columns two tables have in common, in the old table's order."""
+    new_columns = set(column_names(conn, new_table))
+    return [name for name in column_names(conn, old_table) if name in new_columns]
+
+
+def rebuild_sandboxes_table(conn: sqlite3.Connection) -> None:
+    """Remakes the sandboxes table, keeping every row, if schema.sql now defines it differently."""
+    conn.execute("BEGIN IMMEDIATE")   # a second server starting at the same time waits, then sees it's done
+    try:
+        wanted = sandboxes_table_from_schema()
+        if comparable_sql(live_sandboxes_table(conn)) != comparable_sql(wanted):
+            replace_sandboxes_table(conn, wanted)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def replace_sandboxes_table(conn: sqlite3.Connection, create_sql: str) -> None:
+    """Swaps the sandboxes table for a new one, copying over every column the two share."""
+    # The old table is renamed first (not SQLite's usual create-new-first order) so schema.sql's
+    # statement can create "sandboxes" as written. Safe only while nothing (foreign key, view,
+    # trigger) points at sandboxes: a rename would carry that reference over to sandboxes_old.
+    # Shared columns keep their values, so columns added on another branch survive a merge;
+    # new columns start at their default.
+    conn.execute("ALTER TABLE sandboxes RENAME TO sandboxes_old")
+    conn.execute(create_sql)
+    shared = ", ".join(shared_columns(conn, "sandboxes_old", "sandboxes"))
+    conn.execute(f"INSERT INTO sandboxes ({shared}) SELECT {shared} FROM sandboxes_old")
+    conn.execute("DROP TABLE sandboxes_old")
 
 
 def now() -> int:
@@ -95,6 +156,36 @@ def claim_turn(sandbox_id: str) -> bool:
         cursor = conn.execute(
             "UPDATE sandboxes SET turn_state = ? WHERE id = ? AND turn_state = ?",
             (TurnState.WORKING, sandbox_id, TurnState.IDLE),
+        )
+    return cursor.rowcount == 1
+
+
+# Columns transition() may set alongside the state; names go into the SQL, so only these are allowed.
+TRANSITION_FIELDS = frozenset({"snapshot_dir", "paused_at"})
+
+
+def require_transition_fields(fields: dict) -> None:
+    """Refuses any column transition() isn't allowed to set, since column names go into the SQL."""
+    unknown = set(fields) - TRANSITION_FIELDS
+    if unknown:
+        raise ValueError(f"transition can't set {sorted(unknown)}")
+
+
+def transition(
+    sandbox_id: str,
+    from_states: list[SandboxState],
+    to_state: SandboxState,
+    **fields: str | int | None,
+) -> bool:
+    """Moves a sandbox to a new state only if it's in one of the expected ones; says whether it moved."""
+    require_transition_fields(fields)
+    # one UPDATE does the check and the write, so two requests can't both pass the check
+    assignments = ", ".join(["state = ?", "updated_at = ?", *(f"{name} = ?" for name in fields)])
+    placeholders = ", ".join("?" for _ in from_states)
+    with closing(connect()) as conn:
+        cursor = conn.execute(
+            f"UPDATE sandboxes SET {assignments} WHERE id = ? AND state IN ({placeholders})",
+            (to_state, now(), *fields.values(), sandbox_id, *from_states),
         )
     return cursor.rowcount == 1
 

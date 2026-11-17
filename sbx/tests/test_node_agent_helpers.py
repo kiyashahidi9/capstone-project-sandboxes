@@ -1,7 +1,7 @@
 import os
 import sqlite3
 import threading
-from contextlib import closing
+from contextlib import closing, nullcontext
 
 import pytest
 
@@ -258,3 +258,133 @@ def test_list_host_sandboxes(fake_sandboxes_root):
     node_agent.claim_free_slot(ID_B)                   # holds a slot but its folder is gone (orphan)
     os.mkdir(f"{fake_sandboxes_root}/sbx1")            # old-format leftover: not ours, ignored
     assert node_agent.list_host_sandboxes() == sorted([ID_A, ID_B])
+
+
+# --- pause_sandbox / resume_sandbox (4b) ----------------------------------------
+
+FULL_MEM_BYTES = node_agent.MEMORY_MIB * node_agent.BYTES_PER_MIB
+
+
+def write_file_of_size(path, size):
+    """Create a file of `size` bytes, making its folder if needed (test setup)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.truncate(size)                               # sparse, so a 1 GiB mem costs no real disk
+
+
+def write_full_snapshot(sandbox_id):
+    """Put a complete-looking snapshot and disk in place for sandbox_id (test setup)."""
+    write_file_of_size(node_agent.vmstate_path(sandbox_id), 1)
+    write_file_of_size(node_agent.mem_path(sandbox_id), FULL_MEM_BYTES)
+    write_file_of_size(node_agent.disk_path(sandbox_id), 1)
+
+
+class FakeFirecracker:
+    """Stands in for Firecracker during pause tests, remembering every call it gets."""
+
+    def __init__(self):
+        self.calls = []
+        self.killed = []
+        self.mem_bytes_to_write = None                 # None: snapshot/create writes no files
+
+    def put(self, client, path, body):
+        """Remember a PUT; for snapshot/create, write the snapshot files if a size was set."""
+        self.calls.append(("PUT", path))
+        if path == "/snapshot/create" and self.mem_bytes_to_write is not None:
+            write_file_of_size(body["snapshot_path"], 1)
+            write_file_of_size(body["mem_file_path"], self.mem_bytes_to_write)
+
+    def patch(self, client, path, body):
+        """Remember a PATCH and the VM state it asks for."""
+        self.calls.append(("PATCH", path, body["state"]))
+
+
+@pytest.fixture
+def fake_firecracker(fake_sandboxes_root, monkeypatch):
+    """Swap the guest, Firecracker and kill calls that pause makes for a fake that records them."""
+    fake = FakeFirecracker()
+    monkeypatch.setattr(node_agent, "require_running", lambda sandbox_id: None)
+    monkeypatch.setattr(node_agent, "sync_guest_disk", lambda sandbox_id: None)
+    monkeypatch.setattr(node_agent, "firecracker_client", lambda sandbox_id: nullcontext())
+    monkeypatch.setattr(node_agent, "firecracker_put", fake.put)
+    monkeypatch.setattr(node_agent, "firecracker_patch", fake.patch)
+    monkeypatch.setattr(node_agent, "kill_firecracker", fake.killed.append)
+    return fake
+
+
+def test_snapshot_paths(fake_sandboxes_root):
+    assert node_agent.snapshot_dir(ID_A) == f"{fake_sandboxes_root}/{ID_A}/snap"
+    assert node_agent.vmstate_path(ID_A) == f"{fake_sandboxes_root}/{ID_A}/snap/vmstate"
+    assert node_agent.mem_path(ID_A) == f"{fake_sandboxes_root}/{ID_A}/snap/mem"
+
+
+def test_pause_freezes_then_snapshots_then_kills(fake_firecracker):
+    fake_firecracker.mem_bytes_to_write = FULL_MEM_BYTES
+    timings = node_agent.pause_sandbox(ID_A)
+    assert fake_firecracker.calls == [("PATCH", "/vm", "Paused"), ("PUT", "/snapshot/create")]
+    assert fake_firecracker.killed == [ID_A]
+    assert set(timings) == {"sync_s", "freeze_s", "snapshot_s", "kill_s"}
+
+
+def test_pause_keeps_the_vm_running_if_no_snapshot_was_written(fake_firecracker):
+    """No snapshot files: unfreeze the VM and never kill it, or the sandbox is lost."""
+    with pytest.raises(RuntimeError, match="snapshot file missing"):
+        node_agent.pause_sandbox(ID_A)
+    assert fake_firecracker.calls[-1] == ("PATCH", "/vm", "Resumed")
+    assert fake_firecracker.killed == []
+
+
+def test_pause_keeps_the_vm_running_if_mem_is_too_small(fake_firecracker):
+    """A cut-short mem file (the 4a gotcha) counts as a failed snapshot."""
+    fake_firecracker.mem_bytes_to_write = FULL_MEM_BYTES - 1
+    with pytest.raises(RuntimeError, match="mem file is"):
+        node_agent.pause_sandbox(ID_A)
+    assert fake_firecracker.calls[-1] == ("PATCH", "/vm", "Resumed")
+    assert fake_firecracker.killed == []
+
+
+def test_pause_never_passes_on_files_from_an_earlier_pause(fake_firecracker):
+    """Old snapshot files are cleared first, so a pause that writes nothing still fails."""
+    write_full_snapshot(ID_A)
+    with pytest.raises(RuntimeError, match="snapshot file missing"):
+        node_agent.pause_sandbox(ID_A)
+    assert fake_firecracker.killed == []
+
+
+def test_pause_leaves_a_paused_sandboxs_snapshot_alone(fake_sandboxes_root):
+    """Pausing twice must not delete the only copy of a paused sandbox."""
+    write_full_snapshot(ID_A)                          # no PID file, so it isn't running
+    with pytest.raises(RuntimeError, match="not running"):
+        node_agent.pause_sandbox(ID_A)
+    assert os.path.getsize(node_agent.mem_path(ID_A)) == FULL_MEM_BYTES
+
+
+@pytest.mark.parametrize("path_of_missing_file", [
+    node_agent.vmstate_path, node_agent.mem_path, node_agent.disk_path,
+], ids=["vmstate", "mem", "rootfs"])
+def test_resume_raises_when_a_file_is_missing(fake_sandboxes_root, monkeypatch, path_of_missing_file):
+    monkeypatch.setattr(node_agent, "start_vm_process", lambda sandbox_id, n: pytest.fail("must not start"))
+    write_full_snapshot(ID_A)
+    os.remove(path_of_missing_file(ID_A))
+    with pytest.raises(FileNotFoundError):
+        node_agent.resume_sandbox(ID_A)
+
+
+def test_resume_kills_firecracker_and_keeps_the_snapshot_if_a_step_fails(fake_sandboxes_root, monkeypatch):
+    """The snapshot is the only copy of the sandbox, so a failed resume must leave it for a retry."""
+    killed = []
+    monkeypatch.setattr(node_agent, "start_vm_process", lambda sandbox_id, n: 4242)
+    monkeypatch.setattr(node_agent, "kill_firecracker", killed.append)
+
+    def failing_load(sandbox_id):
+        raise RuntimeError("snapshot/load rejected")
+
+    monkeypatch.setattr(node_agent, "restore_vm", failing_load)
+    write_full_snapshot(ID_A)
+    insert_slot(2, ID_A)
+
+    with pytest.raises(RuntimeError, match="snapshot/load rejected"):
+        node_agent.resume_sandbox(ID_A)
+    assert killed == [ID_A]
+    assert os.path.exists(node_agent.vmstate_path(ID_A))
+    assert os.path.exists(node_agent.mem_path(ID_A))
