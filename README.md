@@ -3,7 +3,7 @@
 Persistent Firecracker sandboxes for long-running coding agents. Each sandbox is a Firecracker microVM on a Linux host with KVM. An API server manages them, and a Python SDK and example agents use that API.
 
 ```text
-Client / AI Agent (example_agent, client)
+Client / AI Agent (client)
        |
        | Python SDK (sdk/)
        v
@@ -39,7 +39,7 @@ Client / AI Agent (example_agent, client)
 
 ## Repository layout
 
-All program code lives in `sbx/`. The `.env` file stays at the repo root.
+All program code lives in `sbx/`. The `.env` file stays at the repo root. Milestone 2 (Track A) changes are summarized in [TRACK_A.md](TRACK_A.md).
 
 ```
 sbx/
@@ -49,9 +49,14 @@ sbx/
   scripts/         host setup, networking and guest agent install scripts
   guest_agent/     HTTP server that runs inside the "VM"
   sdk/             Python SDK + smoke test                               (1H/I)
-  client/          interactive chat agent (one sandbox across tasks)     (1H/I)
+  client/          thin chat app: sends messages, shows events           (2g)
+  runner/          runs the client's agent on the host, once per message (2e)
+  locks.py         one lock per sandbox (turns, pause, resume)           (2e)
+  examples/agent/  example agent that follows the agent contract         (2d)
+  docs/            agent_contract.md: how a client hands us their agent  (2c)
   example_agent/   one-shot OpenAI coding agent                          (1H/I)
-  tests/           pytest suite
+  tests/           pytest suite, plus the acceptance checklists          (1J)
+  Track C README.md  pause and resume: decisions and experiment results  (4a-4c)
 ```
 
 ---
@@ -111,15 +116,29 @@ This takes a few minutes. It:
 
 and ends with a checklist. Every line should show `[x]`. It's safe to rerun. To rebuild the base image from scratch, run `sudo scripts/setup_host.sh --rebuild-rootfs`.
 
-#### 5. Start the API server (on the VM)
+#### 5. Add the host's `.env` and lock the agent down (on the VM)
+
+The agent runs on the host, so the AI key lives there. From the repo root:
+
+```bash
+cp .env.example .env          # then set SANDBOX_ADMIN_KEY and OPENAI_API_KEY; keep AGENT_CMD as it is
+cd sbx
+sudo scripts/setup_agents.sh  # every checklist line should show [x]
+```
+
+Make the admin key with `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` and share it with your teammates. Every API request needs it.
+
+`setup_agents.sh` creates the `sbx-agent` user, installs the agent in `/opt/agents`, and makes `.env` root only. You don't need to edit `.env` afterwards, but if you change it later, use `sudo nano ../.env`. Rerun it after `setup_host.sh` (which hands `.env` back to you) and after changing the agent.
+
+#### 6. Start the API server (on the VM)
 
 From `sbx/`:
 
 ```bash
-sudo .venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Leave it running. Check it from a second terminal on the VM with `curl http://localhost:8000/sandboxes`, which should return `[]`. For more detail, see [Start the API server](#start-the-api-server).
+Leave it running. Check it from a second terminal on the VM with `curl -H "Authorization: Bearer <admin key>" http://localhost:8000/sandboxes`, which should return `{"sandboxes":[]}`. For more detail, see [Start the API server](#start-the-api-server).
 
 #### Stopping and starting the VM
 
@@ -137,7 +156,7 @@ The SDK and agents talk to the API server running on the GCP VM (see [Start the 
 ```bash
 # install uv if you don't have it: https://docs.astral.sh/uv/getting-started/installation/
 
-# set up env vars (at the repo root), then fill in OPENAI_API_KEY in .env
+# at the repo root: set SANDBOX_ADMIN_KEY to the same value as on the VM (no OpenAI key needed).
 # SANDBOX_API defaults to http://localhost:8000, the local end of the tunnel
 cp .env.example .env
 
@@ -150,13 +169,13 @@ uv sync
 # terminal 2: forward localhost:8000 to the API on the VM (unless VS code remote does it already)
 gcloud compute ssh sbx-node-1 --zone=us-east1-b -- -N -L 8000:localhost:8000
 
-# check the API is reachable
-curl http://localhost:8000/sandboxes
+# check the API is reachable (Git Bash or macOS/Linux)
+curl -H "Authorization: Bearer <admin key>" http://localhost:8000/sandboxes
 ```
 
 ### Using the client agent
 
-The client agent is an interactive chat. It opens one sandbox and keeps it for every task in the session. It needs the API server running on the VM, the SSH tunnel open, and `OPENAI_API_KEY` set in `.env` (see [Connecting from your computer](#connecting-from-your-computer)).
+The client is a thin chat app. It creates one sandbox and keeps it for the session. Each message goes to the API, which runs the agent **on the host** (`AGENT_CMD` in the host's `.env`), and the app prints the agent's progress as it comes in. It needs the API server running on the VM, the SSH tunnel open, and `SANDBOX_ADMIN_KEY` in your `.env`.
 
 Start it from `sbx/`:
 
@@ -164,7 +183,7 @@ Start it from `sbx/`:
 uv run python -m client.client
 ```
 
-When it prints `sandbox <id> ready`, type a task at the `>` prompt. The agent runs commands and edits files in the sandbox, starting from `/root`, and then prints its answer and `done`. Later tasks run in the same sandbox, so you can build on earlier work:
+When it prints `sandbox <id> ready`, type a task at the `>` prompt. The agent's steps print as they happen, then `done`. A question from the agent shows as `[waiting on you] ...`, so answer it as your next message. Later tasks run in the same sandbox and see the earlier conversation:
 
 ```
 > clone https://github.com/kiyashahidi9/example-express-app and start the dev server
@@ -172,7 +191,7 @@ When it prints `sandbox <id> ready`, type a task at the `>` prompt. The agent ru
 > add a /time route that returns the current time, then curl it
 ```
 
-Type `/quit` to exit. The sandbox is destroyed when you exit, including with Ctrl+C. For the one-shot agent and more examples, see [Running the agents](#running-the-agents).
+Type `/quit` to exit. The sandbox is destroyed when you exit, including with Ctrl+C. To hand us a different agent, see [docs/agent_contract.md](sbx/docs/agent_contract.md).
 
 ### Running the tests
 
@@ -183,7 +202,7 @@ From `sbx/`, with [uv](https://docs.astral.sh/uv/) installed and Python 3.11 or 
 ```bash
 cd sbx
 uv sync
-uv run pytest tests/test_api.py tests/test_db.py -v
+uv run pytest tests/test_api.py tests/test_db.py tests/test_runner.py tests/test_client.py -v
 ```
 
 `uv sync` installs the project, including pytest.
@@ -197,8 +216,10 @@ uv run pytest tests/test_db.py -v
 
 | File | What it covers |
 |------|----------------|
-| `tests/test_api.py` | Create, list, get, delete, exec, and file read/write. The boot, command, and file calls are faked. |
+| `tests/test_api.py` | Create, list, get, delete, exec, file read/write, messages and events. The boot, command, and file calls are faked. |
 | `tests/test_db.py` | The SQLite tables: insert, state changes, lookup, and list order. Uses a temporary database file. |
+| `tests/test_runner.py` | The agent runner, with tiny fake agents: output, questions, failures, timeouts, stopping a turn. |
+| `tests/test_client.py` | The chat app end to end (client → API → runner → fake agent), with the VM faked. |
 
 `uv run pytest` also runs `tests/test_node_agent_helpers.py`. That file checks slot allocation and does not need a virtual machine. `tests/test_node_agent.py` boots real Firecracker virtual machines and skips itself on a machine without root and `/dev/kvm`.
 
@@ -280,7 +301,7 @@ A **cgroup** (control group) is a Linux group of processes whose CPU and memory 
 | Add a process | Write its PID to `.../<sandbox_id>/cgroup.procs` |
 | Read CPU use | `.../<sandbox_id>/cpu.stat` |
 
-**Why:** each sandbox's Firecracker process gets its own group, so Milestone 2's sampler can see how busy each VM is **from the host**, with no code inside the VM.
+**Why:** each sandbox's Firecracker process gets its own group, so Milestone 3's sampler can see how busy each VM is **from the host**, with no code inside the VM.
 
 **Order matters:** a cgroup can only be removed once its process is gone, so `destroy_sandbox` kills Firecracker first.
 
@@ -299,7 +320,7 @@ That one process **is** the whole VM. Everything inside it (guest agent, `npm`, 
 - **Kill the PID → the whole sandbox stops.**
 - **One cgroup per sandbox** measures everything in the VM.
 - **The PID is saved** (`firecracker.pid`), so a restarted node agent can still find and kill it.
-- **The PID changes on resume** (Milestone 3): pause kills the process, resume starts a new one. The sandbox ID and slot stay the same (a paused sandbox keeps its slot, since its network must still be there on wake-up).
+- **The PID changes on resume** (Milestone 4): pause kills the process, resume starts a new one. The sandbox ID and slot stay the same (a paused sandbox keeps its slot, since its network must still be there on wake-up).
 
 ### 6. What the API server (1G) gets from here
 
@@ -311,7 +332,7 @@ That one process **is** the whole VM. Everything inside it (guest agent, `npm`, 
 | On startup: anything on the host the DB doesn't know? | `list_host_sandboxes()` (then `destroy_sandbox` each orphan) |
 | Restart the server without killing VMs | Firecracker starts in its own session, so Ctrl+C on uvicorn doesn't reach it |
 
-**Still 1G's job:** its own `sandboxes` table (state, pid, timestamps) in the **same** `state.db`. It shouldn't store `n` again: `JOIN slots ON slots.sandbox_id = sandboxes.id` or `find_slot(id)` gives the slot, so there is only one copy. Also one lock per sandbox, so `exec` and `destroy` for the same ID can't overlap.
+**Still 1G's job:** its own `sandboxes` table (state, timestamps) in the **same** `state.db`. It shouldn't store `n` again: `JOIN slots ON slots.sandbox_id = sandboxes.id` or `find_slot(id)` gives the slot, so there is only one copy. Also one lock per sandbox, so `exec` and `destroy` for the same ID can't overlap.
 
 ### 1F tradeoffs
 
@@ -381,6 +402,8 @@ The API server acts as the entry point for clients and AI agents to interact wit
 
 ### REST API endpoints
 
+> Since Milestone 2 (2f), every request needs `-H "Authorization: Bearer <admin key>"`. The `curl` examples in this section predate that. See [TRACK_A.md](TRACK_A.md).
+
 **File:** `api/main.py`
 
 | Method | Endpoint | Node Agent Function | Response |
@@ -401,50 +424,58 @@ The API server acts as the entry point for clients and AI agents to interact wit
 POST /sandboxes
 ```
 
+**201 Created:**
+
 ```json
 {
-  "id": "sbx1",
-  "state": "running"
+  "id": "sbx_3f9c1a7e…",
+  "state": "running",
+  "ip": "10.201.0.1",
+  "created_at": 1794470400,
+  "updated_at": 1794470402,
+  "boot_seconds": 1.8
 }
 ```
 
-**List all sandboxes**
+**List all sandboxes** (destroyed ones included, oldest first)
 
 ```http
 GET /sandboxes
 ```
 
 ```json
-[
-  {
-    "id": "sbx1",
-    "state": "running"
-  },
-  {
-    "id": "sbx2",
-    "state": "destroyed"
-  }
-]
+{
+  "sandboxes": [
+    {"id": "sbx_3f9c1a7e…", "state": "running", "ip": "10.201.0.1", "created_at": 1794470400, "updated_at": 1794470402},
+    {"id": "sbx_b21c90d4…", "state": "destroyed", "ip": null, "created_at": 1794470500, "updated_at": 1794470600}
+  ]
+}
 ```
+
+`ip` is `null` once a sandbox no longer holds a network slot.
 
 **Get sandbox details**
 
 ```http
-GET /sandboxes/sbx1
+GET /sandboxes/sbx_3f9c1a7e…
 ```
 
 ```json
 {
-  "id": "sbx1",
+  "id": "sbx_3f9c1a7e…",
   "state": "running",
-  "created_at": 1794470400
+  "ip": "10.201.0.1",
+  "created_at": 1794470400,
+  "updated_at": 1794470402
 }
 ```
+
+In the examples below, `sbx_3f9c…` stands for a full sandbox ID.
 
 **Execute a command**
 
 ```http
-POST /sandboxes/sbx1/exec
+POST /sandboxes/sbx_3f9c…/exec
 Content-Type: application/json
 ```
 
@@ -461,7 +492,7 @@ Return the Guest Agent's command execution result.
 **Read a file**
 
 ```http
-GET /sandboxes/sbx1/files?path=/tmp/hello.txt
+GET /sandboxes/sbx_3f9c…/files?path=/tmp/hello.txt
 ```
 
 Return the requested file contents.
@@ -469,7 +500,7 @@ Return the requested file contents.
 **Write a file**
 
 ```http
-PUT /sandboxes/sbx1/files?path=/tmp/hello.txt
+PUT /sandboxes/sbx_3f9c…/files?path=/tmp/hello.txt
 ```
 
 Pass the request body to `write_file()`.
@@ -485,7 +516,7 @@ Response:
 **Destroy a sandbox**
 
 ```http
-DELETE /sandboxes/sbx1
+DELETE /sandboxes/sbx_3f9c…
 ```
 
 ```json
@@ -518,7 +549,7 @@ GET /sandboxes/unknown
 #### Example: sandbox not running
 
 ```http
-POST /sandboxes/sbx1/exec
+POST /sandboxes/sbx_3f9c…/exec
 ```
 
 ```json
@@ -531,21 +562,20 @@ POST /sandboxes/sbx1/exec
 
 ### SQLite state persistence
 
-**Database:** `state.db`
+**Database:** `/var/sbx/state.db` (the same file as the node agent's `slots` table; `SBX_DB` overrides the path). The tables are in `db/schema.sql` and are created on startup.
 
 Store sandbox metadata in SQLite so that the API server can recover existing sandboxes after restarting.
 
 #### Database schema
 
 ```sql
-CREATE TABLE sandboxes (
-    id          TEXT PRIMARY KEY,
-    n           INTEGER NOT NULL,
-    ip          TEXT NOT NULL,
-    pid         INTEGER,
-    state       TEXT NOT NULL,
-    created_at  INTEGER NOT NULL,
-    updated_at  INTEGER NOT NULL
+CREATE TABLE IF NOT EXISTS sandboxes (
+    id            TEXT PRIMARY KEY,
+    state         TEXT NOT NULL CHECK (state IN ('starting', 'running', 'pausing', 'paused', 'resuming', 'destroyed')),
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    snapshot_dir  TEXT,
+    paused_at     INTEGER
 );
 ```
 
@@ -553,29 +583,27 @@ CREATE TABLE sandboxes (
 
 | Column | Description | Example |
 |--------|-------------|---------|
-| `id` | Unique sandbox identifier | `sbx1` |
-| `n` | Sandbox sequence number | `1` |
-| `ip` | Sandbox IP address | `10.201.0.1` |
-| `pid` | Firecracker process ID | `12345` |
+| `id` | Unique sandbox identifier, same as `slots.sandbox_id` | `sbx_3f9c1a7e…` |
 | `state` | Current sandbox lifecycle state | `running` |
 | `created_at` | Creation timestamp (Unix seconds) | `1794470400` |
-| `updated_at` | Last update timestamp (Unix seconds) | `1794470405` |
+| `updated_at` | Last update timestamp (Unix seconds), changes with state | `1794470405` |
+| `snapshot_dir` | Host folder holding the snapshot; `NULL` unless paused | `/var/sbx/sbx_3f9c…/snap` |
+| `paused_at` | When it was paused (Unix seconds); `NULL` unless paused | `1794470500` |
+
+There are no `n`, `ip` or `pid` columns, so each fact is stored in one place: the slot comes from a join with the `slots` table, the IP is worked out from the slot (`10.201.0.<n>`), and the PID is in `/var/sbx/<id>/firecracker.pid`. Rows are never deleted; a destroyed sandbox keeps its row with `state = 'destroyed'`.
 
 #### Supported states
 
-For Milestone 1G:
-
 ```text
-starting → running → destroyed
+starting → running
+running  → pausing  → paused
+paused   → resuming → running
+any      → destroyed
 ```
 
-Additional states planned for Milestone 3:
+Any other change returns `409`. `pausing` and `resuming` show a change in progress, so a crash in the middle can be spotted and fixed on startup.
 
-```text
-pausing
-paused
-resuming
-```
+SQLite can't change a `CHECK` in place, so changing the states means rebuilding the table. `create_tables()` does this on startup whenever the live table differs from `db/schema.sql`, keeping every row (see `rebuild_sandboxes_table()` in `api/db.py`).
 
 ### Sandbox lifecycle management
 
@@ -607,11 +635,40 @@ DELETE /sandboxes/{id}
 ```
 
 1. Look up the sandbox in SQLite.
-2. Call `destroy_sandbox()` to clean up its resources.
-3. Update the sandbox state to `destroyed`.
-4. Return `{"ok": true}`.
+2. Cut off the agent's turn and take the sandbox's lock, which waits for any pause or resume under way.
+3. Call `destroy_sandbox()` to clean up its resources.
+4. Update the sandbox state to `destroyed`.
+5. Return `{"ok": true}`.
 
-`starting` is a real state. Delete tears down a sandbox that is still `starting`, the same as one that is `running`. A sandbox that is already `destroyed` is left alone, and that call still returns `{"ok": true}`.
+Delete works from any state, including `starting` and `paused`. A sandbox that is already `destroyed` is left alone, and that call still returns `{"ok": true}`.
+
+#### Pausing a sandbox
+
+```http
+POST /sandboxes/{id}/pause
+```
+
+1. Return `409` unless the sandbox is `running`.
+2. Cut off the agent's turn (`stop_turn()`), then take the sandbox's lock.
+3. Set `state = 'pausing'`, call `pause_sandbox()`, then set `state = 'paused'` with `snapshot_dir` and `paused_at`.
+4. Return the sandbox (takes ~15 s: the VM's whole memory is written to disk).
+
+If the pause fails, the state is set to wherever the VM really ended up: `running` if it still answers, `paused` if the snapshot is complete, otherwise `destroyed`.
+
+#### Resuming a sandbox
+
+```http
+POST /sandboxes/{id}/resume
+```
+
+1. Return `409` straight away if the sandbox is `running` or `destroyed`.
+2. Take the sandbox's lock (a resume sent during a pause waits here, then resumes).
+3. Set `state = 'resuming'`, call `resume_sandbox()`, then set `state = 'running'` and clear `snapshot_dir` and `paused_at`.
+4. Return the sandbox (takes ~1–2 s).
+
+If the resume fails, the sandbox stays `paused` and its snapshot is kept, so it can be retried.
+
+**Resume on next request:** `exec` and the file endpoints resume a paused sandbox first, then handle the request; the caller just sees a slower response. A `running` sandbox skips the lock, because the agent's own turn holds it while the agent calls `exec`.
 
 #### Recovering sandboxes on server startup
 
@@ -626,12 +683,16 @@ When FastAPI starts:
 
 **Goal:** Restarting the API server must not destroy healthy Firecracker MicroVMs.
 
+> **Built so far:** on startup, `lifespan` in `api/main.py` creates the tables and settles any sandbox a crash left in `pausing` or `resuming` (`recover_interrupted_changes()` in `api/helpers.py`). A `paused` sandbox has no Firecracker process on purpose, so the steps below must skip it, or every paused sandbox would be destroyed.
+>
+> **Not built yet:** Steps 1–4 above (and destroying host sandboxes with no live row) still need wiring up, using `db.list_live_sandboxes()`, `node_agent.is_sandbox_running()` and `node_agent.list_host_sandboxes()`, which already exist. Healthy VMs already survive a restart, because Firecracker runs in its own session.
+
 ### Start the API server
 
 Run the API on the Linux host:
 
 ```bash
-sudo .venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
 The server listens on port `8000`.
@@ -648,7 +709,7 @@ Expected result:
 HTTP/1.1 200 OK
 ```
 
-The response should contain the sandbox list, initially `[]` if no sandboxes exist.
+The response should contain the sandbox list, initially `{"sandboxes":[]}` if no sandboxes exist.
 
 ### End-to-end testing
 
@@ -657,17 +718,10 @@ Use `curl` to verify all API endpoints.
 #### Test 1: Create sandbox
 
 ```bash
-curl -X POST http://localhost:8000/sandboxes
+ID=$(curl -s -X POST http://localhost:8000/sandboxes | jq -r .id); echo $ID
 ```
 
-Expected:
-
-```json
-{
-  "id": "sbx1",
-  "state": "running"
-}
-```
+Expected: an ID like `sbx_3f9c1a7e…`. The full response also has `"state": "running"`, `ip` and `boot_seconds`. The tests below use `$ID`.
 
 ✅ PASS: Sandbox created successfully.
 
@@ -686,7 +740,7 @@ curl http://localhost:8000/sandboxes
 #### Test 3: Get sandbox details
 
 ```bash
-curl http://localhost:8000/sandboxes/sbx1
+curl http://localhost:8000/sandboxes/$ID
 ```
 
 ✅ PASS: Returns sandbox ID, state, and creation timestamp.
@@ -696,7 +750,7 @@ curl http://localhost:8000/sandboxes/sbx1
 #### Test 4: Execute command
 
 ```bash
-curl -X POST http://localhost:8000/sandboxes/sbx1/exec \
+curl -X POST http://localhost:8000/sandboxes/$ID/exec \
   -H "Content-Type: application/json" \
   -d '{"cmd":"uname -a"}'
 ```
@@ -709,7 +763,7 @@ curl -X POST http://localhost:8000/sandboxes/sbx1/exec \
 
 ```bash
 curl -X PUT \
-  "http://localhost:8000/sandboxes/sbx1/files?path=/tmp/hello.txt" \
+  "http://localhost:8000/sandboxes/$ID/files?path=/tmp/hello.txt" \
   -H "Content-Type: text/plain" \
   --data-binary "Hello from FastAPI"
 ```
@@ -730,7 +784,7 @@ Expected:
 
 ```bash
 curl \
-  "http://localhost:8000/sandboxes/sbx1/files?path=/tmp/hello.txt"
+  "http://localhost:8000/sandboxes/$ID/files?path=/tmp/hello.txt"
 ```
 
 Expected:
@@ -743,10 +797,32 @@ Hello from FastAPI
 
 ❌ FAIL: File cannot be read or content differs.
 
-#### Test 7: Destroy sandbox
+#### Test 7: Pause sandbox
 
 ```bash
-curl -X DELETE http://localhost:8000/sandboxes/sbx1
+curl -X POST http://localhost:8000/sandboxes/$ID/pause
+```
+
+✅ PASS: Returns after ~15 s with `"state": "paused"` and a `paused_at` time; no Firecracker process for `$ID` is left (`pgrep -f $ID/fc.sock` prints nothing).
+
+❌ FAIL: Returns an error, or the state is anything but `paused`.
+
+#### Test 8: Resume on next request
+
+```bash
+curl -X POST http://localhost:8000/sandboxes/$ID/exec \
+  -H "Content-Type: application/json" \
+  -d '{"cmd":"cat /tmp/hello.txt"}'
+```
+
+✅ PASS: Prints `Hello from FastAPI` (the file from Test 5 survived), and `GET /sandboxes/$ID` now shows `"state": "running"`.
+
+❌ FAIL: Returns 409 or 502, or the file is gone.
+
+#### Test 9: Destroy sandbox
+
+```bash
+curl -X DELETE http://localhost:8000/sandboxes/$ID
 ```
 
 Expected:
@@ -784,7 +860,7 @@ Verify that SQLite persistence allows the API server to recover running sandboxe
 5. Restart the API server:
 
 ```bash
-sudo .venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
 6. List the sandboxes:
@@ -796,7 +872,7 @@ curl http://localhost:8000/sandboxes
 7. Execute a command inside the previously created sandbox:
 
 ```bash
-curl -X POST http://localhost:8000/sandboxes/sbx1/exec \
+curl -X POST http://localhost:8000/sandboxes/$ID/exec \
   -H "Content-Type: application/json" \
   -d '{"cmd":"echo recovered"}'
 ```
@@ -862,7 +938,7 @@ Checking whether a PID exists is a minimum recovery check. A production implemen
 
 #### Binding to `0.0.0.0`
 
-The API controls privileged host operations. Binding to `0.0.0.0` exposes it on all host interfaces. Restrict network access and add authentication before allowing untrusted clients to connect.
+The API controls privileged host operations. Binding to `0.0.0.0` exposes it on all host interfaces. Restrict network access and add authentication before allowing untrusted clients to connect. Since Milestone 2 the API binds to `127.0.0.1` instead, because agents run on the host; clients reach it through the SSH tunnel.
 
 #### Staying on httpx 0.28
 
@@ -872,17 +948,11 @@ Pytest prints one warning: Starlette's test client still imports the `httpx` pac
 
 ## Steps 1H/I: SDK and example agents
 
-An example coding agent that uses OpenAI to complete tasks inside a sandbox, through the Python SDK in `sdk/`. For setup, see [Connecting from your computer](#connecting-from-your-computer).
+A coding agent that uses OpenAI to complete tasks inside a sandbox, through the Python SDK in `sdk/`. The agent loop lives in the client app (`client/client.py`, tools in `client/tools.py`). For setup, see [Connecting from your computer](#connecting-from-your-computer).
 
-### Running the agents
+### Running the client agent
 
-Run the one-shot agent:
-
-```bash
-uv run python -m example_agent.agent_openai "create hello.py that prints hello, and run it"
-```
-
-Or start the client agent, an interactive chat that keeps one sandbox open across tasks:
+Start the client agent, an interactive chat that keeps one sandbox open across tasks:
 
 ```bash
 # must be run as a module from sbx/
@@ -892,7 +962,7 @@ uv run python -m client.client
 Type a task at the `>` prompt. The agent works on it in the sandbox and prints its answer. Type `/quit` to exit; the sandbox is destroyed automatically. An example session (the agent's exact steps and wording will vary):
 
 ```
-sandbox sbx1 ready
+sandbox sbx_3f9c1a7e… ready
 > create hello.py that prints hello, and run it
 [write] hello.py
 [run] python hello.py
@@ -902,7 +972,7 @@ done
 > /quit
 ```
 ```
-sandbox sb1 ready
+sandbox sbx_3f9c1a7e… ready
 > clone https://github.com/kiyashahidi9/example-express-app and start the dev server
 > curl the health check
 > add a /time route that returns the current time, then curl it
@@ -918,11 +988,11 @@ Commands run in `/root` by default, so relative paths work in `run_command`. The
 
 The client (`client/client.py`) handles this with a single `WORKDIR` setting, used in three places:
 
-- `build_tools(WORKDIR)` (`client/tools.py`) puts the working directory in each tool's description.
+- `build_tools(WORKDIR)` (`examples/agent/tools.py`) puts the working directory in each tool's description.
 - `run_command` runs with `cwd=WORKDIR`, so commands run where the descriptions say they do.
 - `absolute_path()` joins relative `read_file`/`write_file` paths onto `WORKDIR`.
 
-Any other client should do the same. Tell the model the working directory, through the system prompt, the tool descriptions (`client/tools.py`), or both. Make sure the directory it's told about is the one commands actually run in. If you change `WORKDIR`, that folder must already exist in the VM, or `exec` returns a 400.
+Any other client should do the same. Tell the model the working directory, through the system prompt, the tool descriptions (`examples/agent/tools.py`), or both. Make sure the directory it's told about is the one commands actually run in. If you change `WORKDIR`, that folder must already exist in the VM, or `exec` returns a 400.
 
 ### 1H/I tradeoffs
 
@@ -949,7 +1019,7 @@ Our choice: tool descriptions plus client-side resolution, both driven by one `W
 
 ## Stretch goals
 
-- [ ] **Extract our code into importable layers**, bottom-up, after Milestone 3, once the pause/snapshot/load calls are known:
+- [ ] **Extract our code into importable layers**, bottom-up, after Milestone 4, once the pause/snapshot/load calls are known:
   1. **Firecracker client** (`firecracker_client.py`): only Firecracker's API (boot source, drive, machine config, network, start, later pause/snapshot/load). Takes plain values (socket path, disk path), no `sandbox_id`.
   2. **Sandbox host layer** (`node_agent.py`): numbering, folders, namespaces, cgroups, cleanup, built on the Firecracker client.
 

@@ -3,36 +3,56 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Request
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 
 import node_agent
 from api import db
+from api.auth import require_admin, require_admin_key_set, require_admin_or_turn
 from api.helpers import (
+    HTTP_ACCEPTED,
     HTTP_CREATED,
     boot_sandbox,
     build_create_response,
-    is_destroyed,
+    destroy,
+    ensure_running,
     fetch_file,
-    require_running,
+    pause,
+    recover_interrupted_changes,
     require_sandbox,
+    require_turn,
+    resume,
     run_command,
+    start_turn_in_background,
     store_file,
-    tear_down,
     text_from_body,
     to_background_response,
     to_execute_response,
 )
 from api.models import (
     CreateSandboxResponse,
+    EventListResponse,
+    EventType,
     ExecuteBackgroundResponse,
     ExecuteRequest,
     ExecuteResponse,
+    MessageRequest,
+    MessageResponse,
     SandboxInfo,
     SandboxListResponse,
     SandboxState,
 )
+from runner import runner
+
+
+# AGENT_CMD, AGENT_TURN_TIMEOUT, SANDBOX_ADMIN_KEY and the AI key come from .env at the repo root
+load_dotenv()
+
+# who may call each route (api/auth.py)
+ADMIN_ONLY = Depends(require_admin)
+ADMIN_OR_TURN = Depends(require_admin_or_turn)   # exec and files: also the turn's own agent
 
 
 # ---------------------------------------------------------------------------
@@ -41,8 +61,11 @@ from api.models import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Gets the database ready before the server starts taking requests."""
-    db.create_tables();
+    """Gets the database ready, then ends turns and settles pauses or resumes a crash cut off, before taking requests."""
+    require_admin_key_set()
+    db.create_tables()
+    runner.recover_interrupted_turns()
+    recover_interrupted_changes()
     yield
 
 
@@ -53,7 +76,12 @@ app = FastAPI(title="sbx", lifespan=lifespan)
 # Endpoints: sandboxes
 # ---------------------------------------------------------------------------
 
-@app.post("/sandboxes", status_code=HTTP_CREATED, response_model=CreateSandboxResponse)
+@app.post(
+    "/sandboxes",
+    status_code=HTTP_CREATED,
+    response_model=CreateSandboxResponse,
+    dependencies=[ADMIN_ONLY],
+)
 def create_sandbox() -> CreateSandboxResponse:
     """Makes a brand-new sandbox and tells the client how to reach it."""
     sandbox_id = node_agent.new_sandbox_id()
@@ -63,26 +91,36 @@ def create_sandbox() -> CreateSandboxResponse:
     return build_create_response(sandbox_id, sandbox.boot_seconds)
 
 
-@app.get("/sandboxes", response_model=SandboxListResponse)
+@app.get("/sandboxes", response_model=SandboxListResponse, dependencies=[ADMIN_ONLY])
 def list_sandboxes() -> SandboxListResponse:
     """Shows every sandbox ever made, destroyed ones included, oldest first."""
     rows = db.list_sandboxes()
     return SandboxListResponse(sandboxes=[SandboxInfo.from_row(row) for row in rows])
 
 
-@app.get("/sandboxes/{sandbox_id}", response_model=SandboxInfo)
+@app.get("/sandboxes/{sandbox_id}", response_model=SandboxInfo, dependencies=[ADMIN_ONLY])
 def get_sandbox(sandbox_id: str) -> SandboxInfo:
     """Shows one sandbox's details."""
     return SandboxInfo.from_row(require_sandbox(sandbox_id))
 
 
-@app.delete("/sandboxes/{sandbox_id}")
+@app.delete("/sandboxes/{sandbox_id}", dependencies=[ADMIN_ONLY])
 def delete_sandbox(sandbox_id: str) -> dict[str, bool]:
-    """Shuts a sandbox down for good; asking twice is harmless."""
-    row = require_sandbox(sandbox_id)
-    if not is_destroyed(row):
-        tear_down(sandbox_id)
+    """Shuts a sandbox down for good, after any pause under way; asking twice is harmless."""
+    destroy(sandbox_id)
     return {"ok": True}
+
+
+@app.post("/sandboxes/{sandbox_id}/pause", response_model=SandboxInfo, dependencies=[ADMIN_ONLY])
+def pause_sandbox(sandbox_id: str) -> SandboxInfo:
+    """Saves a running sandbox to disk and frees its memory, cutting off the agent's turn."""
+    return SandboxInfo.from_row(pause(sandbox_id))
+
+
+@app.post("/sandboxes/{sandbox_id}/resume", response_model=SandboxInfo, dependencies=[ADMIN_ONLY])
+def resume_sandbox(sandbox_id: str) -> SandboxInfo:
+    """Brings a paused sandbox back exactly where it left off."""
+    return SandboxInfo.from_row(resume(sandbox_id))
 
 
 # ---------------------------------------------------------------------------
@@ -92,27 +130,62 @@ def delete_sandbox(sandbox_id: str) -> dict[str, bool]:
 @app.post(
     "/sandboxes/{sandbox_id}/exec",
     response_model=ExecuteResponse | ExecuteBackgroundResponse,
+    dependencies=[ADMIN_OR_TURN],
 )
 def exec_command(sandbox_id: str, request: ExecuteRequest) -> ExecuteResponse | ExecuteBackgroundResponse:
-    """Runs a shell command in the sandbox for the client."""
-    require_running(sandbox_id)
+    """Runs a shell command in the sandbox for the client, resuming it first if it's paused."""
+    ensure_running(sandbox_id)
     result = run_command(sandbox_id, request)
     if request.background:
         return to_background_response(result)
     return to_execute_response(result)
 
 
-@app.get("/sandboxes/{sandbox_id}/files", response_class=PlainTextResponse)
+@app.get("/sandboxes/{sandbox_id}/files", response_class=PlainTextResponse, dependencies=[ADMIN_OR_TURN])
 def read_file(sandbox_id: str, path: str) -> str:
-    """Sends the client a file's contents from inside the sandbox as plain text."""
-    require_running(sandbox_id)
+    """Sends the client a file's contents from inside the sandbox, resuming it first if it's paused."""
+    ensure_running(sandbox_id)
     return fetch_file(sandbox_id, path)
 
 
-@app.put("/sandboxes/{sandbox_id}/files")
+@app.put("/sandboxes/{sandbox_id}/files", dependencies=[ADMIN_OR_TURN])
 async def write_file(sandbox_id: str, path: str, request: Request) -> dict[str, bool]:
-    """Saves the uploaded text to a file inside the sandbox."""
-    require_running(sandbox_id)
+    """Saves the uploaded text to a file inside the sandbox, resuming it first if it's paused."""
+    await run_in_threadpool(ensure_running, sandbox_id)   # may wait on the lock, so off the event loop
     content = text_from_body(await request.body())
     await run_in_threadpool(store_file, sandbox_id, path, content)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Endpoints: the conversation
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/sandboxes/{sandbox_id}/messages",
+    status_code=HTTP_ACCEPTED,
+    response_model=MessageResponse,
+    dependencies=[ADMIN_ONLY],
+)
+def send_message(sandbox_id: str, request: MessageRequest) -> MessageResponse:
+    """
+    Saves the user's message and starts the agent on it in the background
+    resumes a paused sandbox first, so the reply is just slower (plan 4c)
+    answers 409 if the sandbox can't run (starting, destroyed) or a turn is already running
+    """
+    # before claiming the turn: ensure_running takes and frees the lock, then the runner takes it
+    ensure_running(sandbox_id)
+    require_turn(sandbox_id)
+
+    # the message is an event too, so the history has the whole conversation
+    seq = db.append_event(sandbox_id, EventType.USER_MESSAGE, {"text": request.text})
+
+    start_turn_in_background(sandbox_id)
+    return MessageResponse(seq=seq)
+
+
+@app.get("/sandboxes/{sandbox_id}/events", response_model=EventListResponse, dependencies=[ADMIN_ONLY])
+def list_events(sandbox_id: str, after: int = Query(default=0, ge=0)) -> EventListResponse:
+    """Shows every event after seq `after`, oldest first; works for destroyed sandboxes too."""
+    require_sandbox(sandbox_id)
+    return EventListResponse(events=db.list_events(sandbox_id, after))

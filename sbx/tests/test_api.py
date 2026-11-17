@@ -1,4 +1,5 @@
 import re
+import threading
 from contextlib import closing
 
 import httpx
@@ -6,19 +7,23 @@ import pytest
 from fastapi.testclient import TestClient
 
 import node_agent
-from api import db
+from api import auth, db
 from api.main import app
-from api.models import CreateSandboxResponse, SandboxState
+from api.models import CreateSandboxResponse, EventType, SandboxState, TurnState
+from runner import runner
 
 
 ID_PATTERN = re.compile(r"sbx_[0-9a-f]{32}")
+ADMIN_KEY = "test-admin-key"
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    """Calls the API with the admin key, like the chat app does."""
     monkeypatch.setenv("SBX_DB", str(tmp_path / "state.db"))
+    monkeypatch.setenv("SANDBOX_ADMIN_KEY", ADMIN_KEY)
     db.create_tables()
-    with TestClient(app) as test_client:
+    with TestClient(app, headers={"Authorization": f"Bearer {ADMIN_KEY}"}) as test_client:
         yield test_client
 
 
@@ -141,6 +146,8 @@ def test_list_shows_a_running_sandbox(client, monkeypatch):
                 "ip": "10.201.0.4",
                 "created_at": created["created_at"],
                 "updated_at": created["updated_at"],
+                "turn_state": "idle",
+                "paused_at": None,
             }
         ]
     }
@@ -192,6 +199,8 @@ def test_get_returns_one_running_sandbox(client, monkeypatch):
         "ip": "10.201.0.4",
         "created_at": created["created_at"],
         "updated_at": created["updated_at"],
+        "turn_state": "idle",
+        "paused_at": None,
     }
 
 
@@ -640,3 +649,293 @@ def test_write_rejects_bytes_that_are_not_text(client, monkeypatch):
     assert response.status_code == 400
     assert response.json() == {"detail": "File body must be text"}
     assert files.saved == {}
+
+
+# ---------------------------------------------------------------------------
+# Messages and events
+# ---------------------------------------------------------------------------
+
+TURN_WAIT = 5   # seconds a test waits for the background turn thread
+
+
+class FakeRunner:
+    """
+    Stands in for runner.run_turn
+    records which sandboxes it was started for
+    finish=True ends the turn like a real agent that exits 0; otherwise the turn stays running
+    """
+
+    def __init__(self, finish: bool):
+        self.finish = finish
+        self.started: list[str] = []
+        self.done = threading.Event()
+
+    def run_turn(self, sandbox_id: str) -> None:
+        self.started.append(sandbox_id)
+        if self.finish:
+            db.append_event(sandbox_id, EventType.TURN_FINISHED, {"exit_code": 0})
+            db.set_turn_state(sandbox_id, TurnState.IDLE)
+        self.done.set()
+
+    def wait(self) -> None:
+        """Blocks until the turn thread has run, and resets for the next turn."""
+        assert self.done.wait(TURN_WAIT), "the turn never started"
+        self.done.clear()
+
+
+def fake_runner(monkeypatch, finish: bool = False) -> FakeRunner:
+    fake = FakeRunner(finish)
+    monkeypatch.setattr(runner, "run_turn", fake.run_turn)
+    return fake
+
+
+def test_message_becomes_event_one_and_starts_a_turn(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    fake = fake_runner(monkeypatch)
+
+    response = client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": "hi"})
+
+    assert response.status_code == 202
+    assert response.json() == {"seq": 1}
+    fake.wait()
+    assert fake.started == [sandbox_id]
+    assert client.get(f"/sandboxes/{sandbox_id}").json()["turn_state"] == "working"
+
+
+def test_events_after_zero_returns_the_message(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    fake = fake_runner(monkeypatch)
+    client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": "hi"})
+    fake.wait()
+
+    response = client.get(f"/sandboxes/{sandbox_id}/events", params={"after": 0})
+
+    assert response.status_code == 200
+    events = response.json()["events"]
+    assert len(events) == 1
+    assert events[0]["seq"] == 1
+    assert events[0]["type"] == "user_message"
+    assert events[0]["data"] == {"text": "hi"}
+    assert isinstance(events[0]["at"], int)
+
+
+def test_events_after_defaults_to_zero(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    fake = fake_runner(monkeypatch)
+    client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": "hi"})
+    fake.wait()
+
+    response = client.get(f"/sandboxes/{sandbox_id}/events")
+
+    assert [event["seq"] for event in response.json()["events"]] == [1]
+
+
+def test_events_after_the_last_seq_returns_nothing(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    fake = fake_runner(monkeypatch)
+    client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": "hi"})
+    fake.wait()
+
+    response = client.get(f"/sandboxes/{sandbox_id}/events", params={"after": 1})
+
+    assert response.status_code == 200
+    assert response.json() == {"events": []}
+
+
+def test_second_message_during_a_turn_is_a_conflict(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    fake = fake_runner(monkeypatch)
+    client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": "first"})
+    fake.wait()
+
+    second = client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": "second"})
+
+    assert second.status_code == 409
+    assert second.json() == {"detail": "A turn is already running"}
+    assert fake.started == [sandbox_id]
+    events = client.get(f"/sandboxes/{sandbox_id}/events").json()["events"]
+    assert [event["data"] for event in events] == [{"text": "first"}]
+
+
+def test_message_after_the_turn_ends_is_accepted(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    fake = fake_runner(monkeypatch, finish=True)
+    client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": "first"})
+    fake.wait()
+
+    second = client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": "second"})
+    fake.wait()
+
+    assert second.status_code == 202
+    assert second.json() == {"seq": 3}   # 1 = first message, 2 = turn_finished
+    events = client.get(f"/sandboxes/{sandbox_id}/events").json()["events"]
+    assert [event["type"] for event in events] == [
+        "user_message",
+        "turn_finished",
+        "user_message",
+        "turn_finished",
+    ]
+
+
+def test_message_to_an_unknown_sandbox_is_not_found(client, monkeypatch):
+    fake = fake_runner(monkeypatch)
+
+    response = client.post(f"/sandboxes/sbx_{'0' * 32}/messages", json={"text": "hi"})
+
+    assert response.status_code == 404
+    assert fake.started == []
+
+
+def test_message_to_a_sandbox_that_is_not_running_is_a_conflict(client, monkeypatch):
+    fake = fake_runner(monkeypatch)
+    starting_id = "sbx_" + "a" * 32
+    db.insert_sandbox(starting_id)
+
+    response = client.post(f"/sandboxes/{starting_id}/messages", json={"text": "hi"})
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Sandbox is not running"}
+    assert fake.started == []
+    assert db.list_events(starting_id) == []
+    assert db.get_sandbox(starting_id).turn_state == TurnState.IDLE
+
+
+def test_message_needs_text(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    fake = fake_runner(monkeypatch)
+
+    empty = client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": ""})
+    missing = client.post(f"/sandboxes/{sandbox_id}/messages", json={})
+
+    assert empty.status_code == 422
+    assert missing.status_code == 422
+    assert fake.started == []
+    assert db.get_sandbox(sandbox_id).turn_state == TurnState.IDLE
+
+
+def test_events_of_an_unknown_sandbox_are_not_found(client):
+    response = client.get(f"/sandboxes/sbx_{'0' * 32}/events")
+
+    assert response.status_code == 404
+
+
+def test_events_reject_a_negative_after(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+
+    response = client.get(f"/sandboxes/{sandbox_id}/events", params={"after": -1})
+
+    assert response.status_code == 422
+
+
+def test_each_sandbox_counts_its_own_seq(client):
+    first_id = "sbx_" + "a" * 32
+    second_id = "sbx_" + "b" * 32
+    db.insert_sandbox(first_id)
+    db.insert_sandbox(second_id)
+
+    first_seqs = [
+        db.append_event(first_id, EventType.AGENT_OUTPUT, {"text": "one"}),
+        db.append_event(first_id, EventType.AGENT_OUTPUT, {"text": "two"}),
+    ]
+    second_seq = db.append_event(second_id, EventType.AGENT_OUTPUT, {"text": "one"})
+
+    assert first_seqs == [1, 2]
+    assert second_seq == 1
+
+
+# ---------------------------------------------------------------------------
+# Auth (2f)
+# ---------------------------------------------------------------------------
+
+def no_key(client) -> dict:
+    """Headers that replace the admin key with nothing."""
+    return {"Authorization": ""}
+
+
+def bearer(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_no_key_is_unauthorized(client):
+    response = client.get("/sandboxes", headers=no_key(client))
+
+    assert response.status_code == 401
+
+
+def test_pause_and_resume_need_the_admin_key(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+
+    paused = client.post(f"/sandboxes/{sandbox_id}/pause", headers=no_key(client))
+    resumed = client.post(f"/sandboxes/{sandbox_id}/resume", headers=no_key(client))
+
+    assert [paused.status_code, resumed.status_code] == [401, 401]
+    assert db.get_sandbox(sandbox_id).state == SandboxState.RUNNING
+
+
+def test_a_wrong_key_is_unauthorized(client):
+    response = client.get("/sandboxes", headers=bearer("not-the-key"))
+
+    assert response.status_code == 401
+
+
+def test_a_turn_token_can_exec_and_use_files_on_its_own_sandbox(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    monkeypatch.setattr(node_agent, "exec", scripted_exec([], {"exit_code": 0, "stdout": "", "stderr": "", "timed_out": False}))
+    monkeypatch.setattr(node_agent, "read_file", lambda sandbox_id, path: "hi")
+    monkeypatch.setattr(node_agent, "write_file", lambda sandbox_id, path, content: None)
+    token = auth.new_turn_token(sandbox_id)
+
+    executed = client.post(f"/sandboxes/{sandbox_id}/exec", json={"cmd": "true"}, headers=bearer(token))
+    written = client.put(f"/sandboxes/{sandbox_id}/files", params={"path": "/root/a"}, content=b"hi", headers=bearer(token))
+    read = client.get(f"/sandboxes/{sandbox_id}/files", params={"path": "/root/a"}, headers=bearer(token))
+
+    assert [executed.status_code, written.status_code, read.status_code] == [200, 200, 200]
+
+
+def test_a_turn_token_cannot_touch_another_sandbox(client, monkeypatch):
+    own_id = make_running_sandbox(client, monkeypatch)
+    other_id = "sbx_" + "b" * 32
+    token = auth.new_turn_token(own_id)
+
+    executed = client.post(f"/sandboxes/{other_id}/exec", json={"cmd": "true"}, headers=bearer(token))
+    read = client.get(f"/sandboxes/{other_id}/files", params={"path": "/root/a"}, headers=bearer(token))
+
+    assert executed.status_code == 403
+    assert read.status_code == 403
+
+
+def test_a_turn_token_cannot_call_admin_routes(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    token = auth.new_turn_token(sandbox_id)
+
+    responses = [
+        client.delete(f"/sandboxes/{sandbox_id}", headers=bearer(token)),
+        client.get("/sandboxes", headers=bearer(token)),
+        client.post("/sandboxes", headers=bearer(token)),
+        client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": "hi"}, headers=bearer(token)),
+        client.get(f"/sandboxes/{sandbox_id}/events", headers=bearer(token)),
+        client.post(f"/sandboxes/{sandbox_id}/pause", headers=bearer(token)),
+        client.post(f"/sandboxes/{sandbox_id}/resume", headers=bearer(token)),
+    ]
+
+    assert [response.status_code for response in responses] == [403] * 7
+    assert db.get_sandbox(sandbox_id).state == SandboxState.RUNNING
+
+
+def test_a_dropped_turn_token_stops_working(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    token = auth.new_turn_token(sandbox_id)
+    auth.drop_turn_token(token)
+
+    response = client.post(f"/sandboxes/{sandbox_id}/exec", json={"cmd": "true"}, headers=bearer(token))
+
+    assert response.status_code == 401
+
+
+def test_the_server_refuses_to_start_without_an_admin_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("SBX_DB", str(tmp_path / "state.db"))
+    monkeypatch.delenv("SANDBOX_ADMIN_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="SANDBOX_ADMIN_KEY"):
+        with TestClient(app):
+            pass

@@ -62,6 +62,10 @@ HEALTH_WAIT_TIMEOUT = 30.0
 HEALTH_POLL_INTERVAL = 0.2
 PROCESS_EXIT_TIMEOUT = 5.0
 EXEC_HTTP_MARGIN = 30.0           # extra HTTP time on top of a command's own timeout
+SNAPSHOT_HTTP_TIMEOUT = 60.0      # snapshot/create took 9.2s in 4a; httpx's default 5s would cut it off
+SYNC_TIMEOUT = 60                 # seconds the guest gets to write its cached files to disk before a pause
+
+BYTES_PER_MIB = 1024 * 1024
 
 
 class NoFreeSlotsError(RuntimeError):
@@ -150,6 +154,21 @@ def pid_file_path(sandbox_id: str) -> str:
 def console_log_path(sandbox_id: str) -> str:
     """Return the path of the file that captures the VM's console output."""
     return f"{sandbox_dir(sandbox_id)}/console.log"
+
+
+def snapshot_dir(sandbox_id: str) -> str:
+    """Return the folder that holds the sandbox's snapshot while it's paused."""
+    return f"{sandbox_dir(sandbox_id)}/snap"
+
+
+def vmstate_path(sandbox_id: str) -> str:
+    """Return the snapshot file with the VM's CPU and device state (small)."""
+    return f"{snapshot_dir(sandbox_id)}/vmstate"
+
+
+def mem_path(sandbox_id: str) -> str:
+    """Return the snapshot file with the VM's whole memory (as big as its RAM)."""
+    return f"{snapshot_dir(sandbox_id)}/mem"
 
 
 def cgroup_dir(sandbox_id: str) -> str:
@@ -304,9 +323,10 @@ def start_firecracker(sandbox_id: str, n: int) -> int:
         "ip", "netns", "exec", namespace_for(n),
         "firecracker", "--api-sock", socket_path(sandbox_id),
     ]
-    with open(console_log_path(sandbox_id), "w") as console_log:
+    with open(console_log_path(sandbox_id), "a") as console_log:   # "a": a resume adds to the boot log instead of erasing it
         process = subprocess.Popen(
             command, stdout=console_log, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,  # don't share our terminal: Firecracker would take over the keyboard for the VM's console
             start_new_session=True,   # own session: Ctrl+C on the API server doesn't kill running VMs (1g restart test)
         )
     return process.pid
@@ -341,7 +361,7 @@ def wait_for_socket(sandbox_id: str) -> None:
 def firecracker_client(sandbox_id: str) -> httpx.Client:
     """Return an HTTP client that talks to Firecracker through its socket file."""
     transport = httpx.HTTPTransport(uds=socket_path(sandbox_id))
-    return httpx.Client(transport=transport, base_url="http://localhost")
+    return httpx.Client(transport=transport, base_url="http://localhost", timeout=SNAPSHOT_HTTP_TIMEOUT)
 
 
 def firecracker_put(client: httpx.Client, path: str, body: dict) -> None:
@@ -350,6 +370,14 @@ def firecracker_put(client: httpx.Client, path: str, body: dict) -> None:
     if response.is_error:
         raise RuntimeError(
             f"Firecracker rejected PUT {path} ({response.status_code}): {response.text}"
+        )
+
+def firecracker_patch(client: httpx.Client, path: str, body: dict) -> None:
+    """Send one PATCH to Firecracker; raise RuntimeError with its error message if rejected."""
+    response = client.patch(path, json=body)
+    if response.is_error:
+        raise RuntimeError(
+            f"Firecracker rejected PATCH {path} ({response.status_code}): {response.text}"
         )
 
 
@@ -564,6 +592,155 @@ def destroy_sandbox(sandbox_id: str) -> None:
         delete_network(n)
         release_slot(n, sandbox_id)
     remove_sandbox_dir(sandbox_id)
+
+
+def timed(step: Callable[[], object]) -> float:
+    """Run one step and return how many seconds it took."""
+    started = time.monotonic()
+    step()
+    return time.monotonic() - started
+
+
+def require_running(sandbox_id: str) -> None:
+    """Raise RuntimeError unless the sandbox's VM is running, so a paused sandbox's snapshot is never touched."""
+    if not is_sandbox_running(sandbox_id):
+        raise RuntimeError(f"{sandbox_id} is not running (already paused, or never started)")
+
+
+def clear_old_snapshot(sandbox_id: str) -> None:
+    """Delete any earlier snapshot, so the check after a pause can only find files from this pause."""
+    shutil.rmtree(snapshot_dir(sandbox_id), ignore_errors=True)
+
+
+def sync_guest_disk(sandbox_id: str) -> None:
+    """Make the guest write its cached file changes to disk, so rootfs.ext4 matches the snapshot."""
+    result = exec(sandbox_id, "sync", timeout=SYNC_TIMEOUT)
+    if result["exit_code"] != 0:
+        raise RuntimeError(f"sync failed in {sandbox_id}: {result['stderr']}")
+
+
+def freeze_vm(client: httpx.Client) -> None:
+    """Stop the VM's CPUs so nothing changes while the snapshot is taken."""
+    firecracker_patch(client, "/vm", {"state": "Paused"})
+
+
+def unfreeze_vm(client: httpx.Client) -> None:
+    """Start the VM's CPUs again after a freeze."""
+    firecracker_patch(client, "/vm", {"state": "Resumed"})
+
+
+def create_snapshot(client: httpx.Client, sandbox_id: str) -> None:
+    """Ask Firecracker to save the frozen VM's state and memory into snap/."""
+    firecracker_put(client, "/snapshot/create", {
+        "snapshot_type": "Full",
+        "snapshot_path": vmstate_path(sandbox_id),
+        "mem_file_path": mem_path(sandbox_id),
+    })
+
+
+def check_snapshot_files(sandbox_id: str) -> None:
+    """Raise RuntimeError unless both snapshot files exist and mem is as big as the VM's RAM."""
+    for path in (vmstate_path(sandbox_id), mem_path(sandbox_id)):
+        if not os.path.exists(path):
+            raise RuntimeError(f"snapshot file missing: {path}")
+    expected_bytes = MEMORY_MIB * BYTES_PER_MIB
+    actual_bytes = os.path.getsize(mem_path(sandbox_id))
+    if actual_bytes < expected_bytes:
+        raise RuntimeError(f"mem file is {actual_bytes} bytes, expected {expected_bytes}")
+
+
+def save_snapshot_or_unfreeze(client: httpx.Client, sandbox_id: str) -> None:
+    """Save a checked snapshot of the frozen VM; if that fails, keep the VM running instead of losing it."""
+    try:
+        create_snapshot(client, sandbox_id)
+        check_snapshot_files(sandbox_id)
+    except Exception:
+        unfreeze_vm(client)
+        raise
+
+
+def remove_socket(sandbox_id: str) -> None:
+    """Delete fc.sock so a new Firecracker can create it again on resume."""
+    if os.path.exists(socket_path(sandbox_id)):
+        os.remove(socket_path(sandbox_id))
+
+
+def stop_paused_vm(sandbox_id: str) -> None:
+    """End the snapshotted VM's process, keeping its disk, slot, network and cgroup for resume."""
+    kill_firecracker(sandbox_id)
+    remove_socket(sandbox_id)
+
+
+def pause_sandbox(sandbox_id: str) -> dict:
+    """Save a running sandbox to snapshot files and free its memory; return how long each part took."""
+    validate_sandbox_id(sandbox_id)
+    require_running(sandbox_id)
+    clear_old_snapshot(sandbox_id)
+    os.makedirs(snapshot_dir(sandbox_id), exist_ok=True)
+    timings = {"sync_s": timed(lambda: sync_guest_disk(sandbox_id))}
+    with firecracker_client(sandbox_id) as client:
+        timings["freeze_s"] = timed(lambda: freeze_vm(client))
+        timings["snapshot_s"] = timed(lambda: save_snapshot_or_unfreeze(client, sandbox_id))
+    timings["kill_s"] = timed(lambda: stop_paused_vm(sandbox_id))
+    return timings
+
+
+def require_resumable_files(sandbox_id: str) -> None:
+    """Raise FileNotFoundError unless the snapshot and its matching disk are all there."""
+    for path in (vmstate_path(sandbox_id), mem_path(sandbox_id), disk_path(sandbox_id)):
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"can't resume {sandbox_id}: missing {path}")
+
+
+def require_stopped(sandbox_id: str) -> None:
+    """Raise RuntimeError if the sandbox's VM is still running (already resumed, or the pause never finished)."""
+    if is_sandbox_running(sandbox_id):
+        raise RuntimeError(f"{sandbox_id} is already running")
+
+
+def start_vm_process(sandbox_id: str, n: int) -> int:
+    """Start an empty Firecracker for the sandbox, ready to receive API calls; return its PID."""
+    pid = start_firecracker(sandbox_id, n)
+    save_pid(sandbox_id, pid)          # saved first, so cleanup can kill it (4a gotcha)
+    move_into_cgroup(sandbox_id, pid)
+    wait_for_socket(sandbox_id)
+    return pid
+
+
+def load_snapshot(client: httpx.Client, sandbox_id: str) -> None:
+    """Ask Firecracker to restore the VM from snap/ and start it running."""
+    firecracker_put(client, "/snapshot/load", {
+        "snapshot_path": vmstate_path(sandbox_id),
+        "mem_backend": {"backend_type": "File", "backend_path": mem_path(sandbox_id)},
+        "resume_vm": True,
+    })
+
+
+def restore_vm(sandbox_id: str) -> None:
+    """Load the sandbox's snapshot into its newly started Firecracker."""
+    with firecracker_client(sandbox_id) as client:
+        load_snapshot(client, sandbox_id)
+
+
+def resume_sandbox(sandbox_id: str) -> dict:
+    """Bring a paused sandbox back exactly where it left off; return its new PID and how long each part took."""
+    validate_sandbox_id(sandbox_id)
+    require_resumable_files(sandbox_id)
+    require_stopped(sandbox_id)
+    n = require_slot(sandbox_id)
+    remove_socket(sandbox_id)
+
+    try:
+        started = time.monotonic()
+        pid = start_vm_process(sandbox_id, n)
+        timings = {"start_s": time.monotonic() - started}
+        timings["load_s"] = timed(lambda: restore_vm(sandbox_id))
+        timings["health_s"] = timed(lambda: wait_for_guest_agent(sandbox_id))
+    except BaseException:
+        kill_firecracker(sandbox_id)   # keep snap/: it's the only copy, so a later resume can retry
+        raise
+
+    return {"pid": pid, **timings}
 
 
 # ---------------------------------------------------------------------------

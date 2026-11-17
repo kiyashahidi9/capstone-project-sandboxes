@@ -2,7 +2,12 @@ import os
 import httpx
 from dotenv import load_dotenv
 
-load_dotenv()   # read .env from the repo root (shell variables still win)
+# read .env from the repo root (shell variables still win);
+# a locked-down agent can't read it (2f) and gets its settings from the environment instead
+try:
+    load_dotenv()
+except OSError:
+    pass
 
 DEFAULT_API = os.environ.get("SANDBOX_API", "http://localhost:8000")
 
@@ -10,6 +15,10 @@ DEFAULT_API = os.environ.get("SANDBOX_API", "http://localhost:8000")
 CREATE_TIMEOUT = 120
 EXEC_TIMEOUT = 660
 DEFAULT_TIMEOUT = 30
+
+# A pause writes the VM's whole memory to disk (~15 s, more if the guest is slow to sync).
+# File calls and destroy may wait for a pause under way, then resume, so they get the same allowance.
+PAUSE_TIMEOUT = 120
 
 
 class SandboxError(Exception):
@@ -62,16 +71,27 @@ def _call_api(
     return res
 
 
+def auth_headers(token: str | None) -> dict[str, str]:
+    """The Authorization header for a token, or no headers without one."""
+    if token is None:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
+
+
 class Sandbox:
     """A sandbox: an isolated Linux VM managed by the sandbox API.
 
     Start one with `Sandbox.create()` and call `destroy()` when you are done.
 
+    A paused sandbox wakes up by itself: `exec()`, `read_file()` and
+    `write_file()` resume it first, so those calls are just a little slower.
+
     Every method raises `SandboxError` when the API responds with an error:
 
     - 400: Bad request, e.g. a relative path or a `cwd` that does not exist.
     - 404: No sandbox exists with this id.
-    - 409: The sandbox has already been destroyed.
+    - 409: The sandbox is in the wrong state for this call, e.g. it has been
+      destroyed, or you paused a sandbox that is already paused.
     - 502: The API could not reach the guest agent inside the VM.
 
     If the API itself cannot be reached, httpx exceptions such as
@@ -82,7 +102,7 @@ class Sandbox:
         api: The base URL of the sandbox API.
     """
 
-    def __init__(self, id: str, api: str = DEFAULT_API):
+    def __init__(self, id: str, api: str = DEFAULT_API, token: str | None = None):
         """Attach to an existing sandbox by id.
 
         This makes no API call, so it does not check that the sandbox exists.
@@ -91,22 +111,49 @@ class Sandbox:
         Args:
             id: The id of an existing sandbox, e.g. "sbx1".
             api: The base URL of the sandbox API. Defaults to `$SANDBOX_API`.
+            token: Sent as `Authorization: Bearer <token>` on every request,
+                if given.
         """
         self.id = id
         self.api = api.rstrip("/")
         self._url = f"{self.api}/sandboxes/{id}"
+        self._headers = auth_headers(token)
+
+    @classmethod
+    def from_env(cls) -> "Sandbox":
+        """Attach to the sandbox an agent was started for.
+
+        Reads `SANDBOX_ID`, `SANDBOX_API` and `SANDBOX_TOKEN`, which the agent
+        runner sets for each turn (see docs/agent_contract.md).
+
+        Returns:
+            The sandbox, ready to use.
+
+        Raises:
+            RuntimeError: If `SANDBOX_ID` is not set.
+        """
+
+        sandbox_id = os.environ.get("SANDBOX_ID")
+        if not sandbox_id:
+            raise RuntimeError("SANDBOX_ID is not set")
+
+        api = os.environ.get("SANDBOX_API", DEFAULT_API)
+        token = os.environ.get("SANDBOX_TOKEN") or None   # an empty value means no token
+
+        return cls(sandbox_id, api, token)
 
     def __repr__(self) -> str:
         return f"Sandbox(id={self.id!r}, api={self.api!r})"
 
     @classmethod
-    def create(cls, api: str = DEFAULT_API) -> "Sandbox":
+    def create(cls, api: str = DEFAULT_API, token: str | None = None) -> "Sandbox":
         """Start a new sandbox.
 
         Blocks until the sandbox's VM has booted, for up to `CREATE_TIMEOUT` seconds.
 
         Args:
             api: The base URL of the sandbox API. Defaults to `$SANDBOX_API`.
+            token: Sent as `Authorization: Bearer <token>`, if given.
 
         Returns:
             The new, running sandbox.
@@ -116,10 +163,10 @@ class Sandbox:
         """
 
         url = f"{api.rstrip('/')}/sandboxes"
-        res = _call_api("POST", url, timeout=CREATE_TIMEOUT)
+        res = _call_api("POST", url, timeout=CREATE_TIMEOUT, headers=auth_headers(token))
         sandbox_id = res.json()["id"]
 
-        return cls(sandbox_id, api)
+        return cls(sandbox_id, api, token)
 
     def exec(
             self, 
@@ -156,7 +203,7 @@ class Sandbox:
 
         url = f"{self._url}/exec"
         body = {"cmd": cmd, "cwd": cwd, "background": background}
-        res = _call_api("POST", url, timeout=EXEC_TIMEOUT, json=body)
+        res = _call_api("POST", url, timeout=EXEC_TIMEOUT, json=body, headers=self._headers)
 
         return res.json()
 
@@ -178,7 +225,7 @@ class Sandbox:
 
         url = f"{self._url}/files"
         params = {"path": path}
-        res = _call_api("GET", url, params=params)
+        res = _call_api("GET", url, timeout=PAUSE_TIMEOUT, params=params, headers=self._headers)
 
         return res.text
 
@@ -201,16 +248,79 @@ class Sandbox:
         params = {"path": path}
         data = content.encode()
 
-        _call_api("PUT", url, params=params, content=data)
+        _call_api("PUT", url, timeout=PAUSE_TIMEOUT, params=params, content=data, headers=self._headers)
+
+    def send_message(self, text: str) -> int:
+        """Send the user's message to the sandbox's agent.
+
+        Returns once the turn has started; the agent works in the background
+        on the host. Follow its progress with `events()`. A paused sandbox is
+        resumed first, so the call is a little slower.
+
+        Args:
+            text: The message, e.g. "create hello.py and run it".
+
+        Returns:
+            The message's `seq` in the event log.
+
+        Raises:
+            SandboxError: 409 if a turn is already running, or the sandbox is
+                still starting or has been destroyed.
+        """
+
+        url = f"{self._url}/messages"
+        res = _call_api("POST", url, timeout=PAUSE_TIMEOUT, json={"text": text}, headers=self._headers)
+
+        return res.json()["seq"]
+
+    def events(self, after: int = 0) -> list[dict]:
+        """Get the sandbox's events with a `seq` greater than `after`.
+
+        Args:
+            after: The last `seq` already seen; 0 for everything.
+
+        Returns:
+            The new events, oldest first. Each has `seq`, `type`, `data` and
+            `at` (unix seconds).
+        """
+
+        url = f"{self._url}/events"
+        res = _call_api("GET", url, params={"after": after}, headers=self._headers)
+
+        return res.json()["events"]
+
+    def pause(self) -> None:
+        """Save the sandbox to disk and free its memory.
+
+        Everything is kept: files, running processes and the agent's
+        conversation. An agent turn that is running is cut off. Blocks until
+        the pause is done, usually about 15 seconds.
+
+        Raises:
+            SandboxError: 409 if the sandbox is not running (for example,
+                already paused).
+        """
+
+        _call_api("POST", f"{self._url}/pause", timeout=PAUSE_TIMEOUT, headers=self._headers)
+
+    def resume(self) -> None:
+        """Bring a paused sandbox back exactly where it left off.
+
+        Usually not needed: `exec()`, `read_file()` and `write_file()` resume a
+        paused sandbox by themselves. Takes about 1-2 seconds.
+
+        Raises:
+            SandboxError: 409 if the sandbox is not paused.
+        """
+
+        _call_api("POST", f"{self._url}/resume", timeout=PAUSE_TIMEOUT, headers=self._headers)
 
     def destroy(self) -> None:
         """Stop the sandbox and delete everything in it.
 
         All of its files and running processes, including background ones, are
-        removed. The sandbox cannot be used afterwards.
-
-        Raises:
-            SandboxError: 409 if the sandbox has already been destroyed.
+        removed. The sandbox cannot be used afterwards. If a pause is under
+        way, this waits for it to finish first. Calling it twice is harmless.
         """
 
-        _call_api("DELETE", self._url)
+        _call_api("DELETE", self._url, timeout=PAUSE_TIMEOUT, headers=self._headers)

@@ -1,0 +1,5566 @@
+{
+ "version": "1.0.0",
+ "project": {
+  "name": "persistent-sandboxes",
+  "languages": [
+   "config",
+   "markdown",
+   "python",
+   "shell",
+   "sql",
+   "toml"
+  ],
+  "frameworks": [
+   "FastAPI",
+   "Pydantic",
+   "Uvicorn",
+   "pytest"
+  ],
+  "description": "Persistent Firecracker microVM sandboxes for long-running coding agents, managed by a FastAPI server and node agent on a KVM Linux host, with a Python SDK and example client agents that use the API.",
+  "analyzedAt": "2026-11-12T21:10:28.411283+00:00",
+  "gitCommitHash": "be40aca238af650bccf31a9d2e5efb404d561bb0"
+ },
+ "nodes": [
+  {
+   "id": "file:sbx/api/__init__.py",
+   "type": "file",
+   "name": "__init__.py",
+   "filePath": "sbx/api/__init__.py",
+   "summary": "Empty package marker that makes sbx/api importable as the `api` package for the FastAPI control-plane server.",
+   "tags": [
+    "entry-point",
+    "barrel",
+    "package-marker"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:sbx/api/db.py",
+   "type": "file",
+   "name": "db.py",
+   "filePath": "sbx/api/db.py",
+   "summary": "SQLite state-database layer for the API server: opens WAL connections, creates tables from db/schema.sql, and records, updates, and lists sandbox rows joined to their network slots.",
+   "tags": [
+    "database",
+    "data-access",
+    "sqlite",
+    "persistence",
+    "service",
+    "tested"
+   ],
+   "complexity": "moderate",
+   "languageNotes": "Uses contextlib.closing around sqlite3 connections and a LEFT JOIN so sandboxes without a slot still appear with a NULL slot number."
+  },
+  {
+   "id": "file:sbx/api/helpers.py",
+   "type": "file",
+   "name": "helpers.py",
+   "filePath": "sbx/api/helpers.py",
+   "summary": "Request-handling helpers for the FastAPI endpoints: 404/409 guards, booting and tearing down sandboxes via the node agent, running commands and file I/O in the guest, and translating guest-agent errors into HTTP responses.",
+   "tags": [
+    "api-handler",
+    "utility",
+    "error-handling",
+    "service",
+    "validation"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:sbx/api/main.py",
+   "type": "file",
+   "name": "main.py",
+   "filePath": "sbx/api/main.py",
+   "summary": "FastAPI application entry point exposing REST endpoints to create, list, get, and delete sandboxes plus exec commands and read/write files inside a running sandbox.",
+   "tags": [
+    "entry-point",
+    "api-handler",
+    "fastapi",
+    "rest-api",
+    "routing",
+    "tested"
+   ],
+   "complexity": "moderate",
+   "languageNotes": "Mixes sync and async FastAPI handlers; the async file-write endpoint offloads blocking node-agent I/O with starlette's run_in_threadpool."
+  },
+  {
+   "id": "function:sbx/api/db.py:connect",
+   "type": "function",
+   "name": "connect",
+   "filePath": "sbx/api/db.py",
+   "lineRange": [
+    29,
+    38
+   ],
+   "summary": "Opens a fresh SQLite connection to the state database with WAL mode, busy timeout, and row factory settings.",
+   "tags": [
+    "database",
+    "connection",
+    "sqlite"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/db.py:make_db_folder",
+   "type": "function",
+   "name": "make_db_folder",
+   "filePath": "sbx/api/db.py",
+   "lineRange": [
+    41,
+    43
+   ],
+   "summary": "Creates the directory holding the state database file if it does not exist.",
+   "tags": [
+    "utility",
+    "filesystem",
+    "setup"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/db.py:create_tables",
+   "type": "function",
+   "name": "create_tables",
+   "filePath": "sbx/api/db.py",
+   "lineRange": [
+    46,
+    50
+   ],
+   "summary": "Idempotently creates the database tables by executing db/schema.sql; run on every server startup.",
+   "tags": [
+    "database",
+    "schema",
+    "setup"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/db.py:now",
+   "type": "function",
+   "name": "now",
+   "filePath": "sbx/api/db.py",
+   "lineRange": [
+    53,
+    55
+   ],
+   "summary": "Returns the current Unix time in whole seconds for timestamps.",
+   "tags": [
+    "utility",
+    "time",
+    "helper"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/db.py:to_sandbox_row",
+   "type": "function",
+   "name": "to_sandbox_row",
+   "filePath": "sbx/api/db.py",
+   "lineRange": [
+    58,
+    60
+   ],
+   "summary": "Converts a sqlite3 result row into a SandboxRow model.",
+   "tags": [
+    "serialization",
+    "mapping",
+    "database"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/db.py:insert_sandbox",
+   "type": "function",
+   "name": "insert_sandbox",
+   "filePath": "sbx/api/db.py",
+   "lineRange": [
+    67,
+    74
+   ],
+   "summary": "Inserts a new sandbox record in the starting state with matching created/updated timestamps.",
+   "tags": [
+    "database",
+    "write",
+    "persistence"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/db.py:set_state",
+   "type": "function",
+   "name": "set_state",
+   "filePath": "sbx/api/db.py",
+   "lineRange": [
+    77,
+    84
+   ],
+   "summary": "Updates a sandbox's state and updated_at timestamp, returning whether the sandbox existed.",
+   "tags": [
+    "database",
+    "state-transition",
+    "write"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/db.py:get_sandbox",
+   "type": "function",
+   "name": "get_sandbox",
+   "filePath": "sbx/api/db.py",
+   "lineRange": [
+    91,
+    97
+   ],
+   "summary": "Looks up one sandbox joined to its slot, returning None if absent.",
+   "tags": [
+    "database",
+    "query",
+    "lookup"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/db.py:list_sandboxes",
+   "type": "function",
+   "name": "list_sandboxes",
+   "filePath": "sbx/api/db.py",
+   "lineRange": [
+    100,
+    104
+   ],
+   "summary": "Lists every sandbox ever created, including destroyed ones, oldest first.",
+   "tags": [
+    "database",
+    "query",
+    "listing"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/db.py:list_live_sandboxes",
+   "type": "function",
+   "name": "list_live_sandboxes",
+   "filePath": "sbx/api/db.py",
+   "lineRange": [
+    107,
+    114
+   ],
+   "summary": "Lists sandboxes that are not destroyed, oldest first.",
+   "tags": [
+    "database",
+    "query",
+    "listing"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:require_sandbox",
+   "type": "function",
+   "name": "require_sandbox",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    31,
+    36
+   ],
+   "summary": "Fetches a sandbox row or raises HTTP 404 if it does not exist.",
+   "tags": [
+    "validation",
+    "guard",
+    "http-error"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:require_running",
+   "type": "function",
+   "name": "require_running",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    39,
+    44
+   ],
+   "summary": "Fetches a sandbox row and raises HTTP 409 unless it is in the running state.",
+   "tags": [
+    "validation",
+    "guard",
+    "state-check"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:boot_sandbox",
+   "type": "function",
+   "name": "boot_sandbox",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    51,
+    60
+   ],
+   "summary": "Boots the Firecracker VM via the node agent; on failure marks the row destroyed and answers 503 when the host is full or 500 otherwise.",
+   "tags": [
+    "lifecycle",
+    "error-handling",
+    "vm-boot"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:build_create_response",
+   "type": "function",
+   "name": "build_create_response",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    63,
+    76
+   ],
+   "summary": "Builds the CreateSandboxResponse for a newly booted sandbox, including its info and boot time.",
+   "tags": [
+    "serialization",
+    "response-builder",
+    "api-handler"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:is_destroyed",
+   "type": "function",
+   "name": "is_destroyed",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    83,
+    85
+   ],
+   "summary": "Checks whether a sandbox row is already in the destroyed state.",
+   "tags": [
+    "predicate",
+    "state-check",
+    "utility"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:tear_down",
+   "type": "function",
+   "name": "tear_down",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    88,
+    91
+   ],
+   "summary": "Destroys a sandbox on the host via the node agent and records it as destroyed.",
+   "tags": [
+    "lifecycle",
+    "teardown",
+    "service"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:guest_error_to_http",
+   "type": "function",
+   "name": "guest_error_to_http",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    98,
+    110
+   ],
+   "summary": "Maps guest-agent HTTP errors to client errors: 4xx statuses pass through, everything else becomes 502 Bad Gateway.",
+   "tags": [
+    "error-handling",
+    "http-error",
+    "translation"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:run_command",
+   "type": "function",
+   "name": "run_command",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    113,
+    126
+   ],
+   "summary": "Runs a shell command in the sandbox through the node agent, converting guest failures to HTTP errors.",
+   "tags": [
+    "exec",
+    "service",
+    "error-handling"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:to_execute_response",
+   "type": "function",
+   "name": "to_execute_response",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    129,
+    131
+   ],
+   "summary": "Shapes a finished command's raw result into an ExecuteResponse.",
+   "tags": [
+    "serialization",
+    "response-builder",
+    "exec"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:to_background_response",
+   "type": "function",
+   "name": "to_background_response",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    134,
+    136
+   ],
+   "summary": "Shapes a background command's pid into an ExecuteBackgroundResponse.",
+   "tags": [
+    "serialization",
+    "response-builder",
+    "exec"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:fetch_file",
+   "type": "function",
+   "name": "fetch_file",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    139,
+    148
+   ],
+   "summary": "Reads a file from inside the sandbox via the node agent, answering 404 if missing.",
+   "tags": [
+    "file-io",
+    "service",
+    "error-handling"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:text_from_body",
+   "type": "function",
+   "name": "text_from_body",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    151,
+    156
+   ],
+   "summary": "Decodes an uploaded request body as UTF-8 text or raises HTTP 400 if it is not text.",
+   "tags": [
+    "validation",
+    "decoding",
+    "file-io"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/helpers.py:store_file",
+   "type": "function",
+   "name": "store_file",
+   "filePath": "sbx/api/helpers.py",
+   "lineRange": [
+    159,
+    166
+   ],
+   "summary": "Writes text to a file inside a running sandbox via the node agent, translating guest errors.",
+   "tags": [
+    "file-io",
+    "service",
+    "error-handling"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/main.py:lifespan",
+   "type": "function",
+   "name": "lifespan",
+   "filePath": "sbx/api/main.py",
+   "lineRange": [
+    43,
+    46
+   ],
+   "summary": "FastAPI lifespan hook that creates the database tables before serving requests.",
+   "tags": [
+    "startup",
+    "lifecycle",
+    "fastapi"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/main.py:create_sandbox",
+   "type": "function",
+   "name": "create_sandbox",
+   "filePath": "sbx/api/main.py",
+   "lineRange": [
+    57,
+    63
+   ],
+   "summary": "POST /sandboxes: allocates an id, records it, boots the VM, marks it running, and returns connection details.",
+   "tags": [
+    "api-handler",
+    "endpoint",
+    "lifecycle"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/main.py:list_sandboxes",
+   "type": "function",
+   "name": "list_sandboxes",
+   "filePath": "sbx/api/main.py",
+   "lineRange": [
+    67,
+    70
+   ],
+   "summary": "GET /sandboxes: returns all sandboxes, destroyed included, oldest first.",
+   "tags": [
+    "api-handler",
+    "endpoint",
+    "listing"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/main.py:get_sandbox",
+   "type": "function",
+   "name": "get_sandbox",
+   "filePath": "sbx/api/main.py",
+   "lineRange": [
+    74,
+    76
+   ],
+   "summary": "GET /sandboxes/{id}: returns one sandbox's client-facing details or 404.",
+   "tags": [
+    "api-handler",
+    "endpoint",
+    "lookup"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/main.py:delete_sandbox",
+   "type": "function",
+   "name": "delete_sandbox",
+   "filePath": "sbx/api/main.py",
+   "lineRange": [
+    80,
+    85
+   ],
+   "summary": "DELETE /sandboxes/{id}: idempotently tears down a sandbox unless already destroyed.",
+   "tags": [
+    "api-handler",
+    "endpoint",
+    "teardown"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/main.py:exec_command",
+   "type": "function",
+   "name": "exec_command",
+   "filePath": "sbx/api/main.py",
+   "lineRange": [
+    96,
+    102
+   ],
+   "summary": "POST /sandboxes/{id}/exec: runs a foreground or background command in a running sandbox.",
+   "tags": [
+    "api-handler",
+    "endpoint",
+    "exec"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/main.py:read_file",
+   "type": "function",
+   "name": "read_file",
+   "filePath": "sbx/api/main.py",
+   "lineRange": [
+    106,
+    109
+   ],
+   "summary": "GET /sandboxes/{id}/files: returns a file's contents from a running sandbox as plain text.",
+   "tags": [
+    "api-handler",
+    "endpoint",
+    "file-io"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/api/main.py:write_file",
+   "type": "function",
+   "name": "write_file",
+   "filePath": "sbx/api/main.py",
+   "lineRange": [
+    113,
+    118
+   ],
+   "summary": "PUT /sandboxes/{id}/files: saves the uploaded text body to a file inside a running sandbox.",
+   "tags": [
+    "api-handler",
+    "endpoint",
+    "file-io"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:sbx/api/models.py",
+   "type": "file",
+   "name": "models.py",
+   "filePath": "sbx/api/models.py",
+   "summary": "Pydantic models and enums defining the API's data contracts: sandbox states, database rows, client-facing sandbox info, and exec request/response shapes with timeout limits.",
+   "tags": [
+    "data-model",
+    "type-definition",
+    "pydantic",
+    "validation",
+    "serialization",
+    "tested"
+   ],
+   "complexity": "moderate",
+   "languageNotes": "Uses Python 3.11 StrEnum and Pydantic Field constraints (gt/le/min_length) so request validation and OpenAPI docs come from the same declarations."
+  },
+  {
+   "id": "file:sbx/tests/test_api.py",
+   "type": "file",
+   "name": "test_api.py",
+   "filePath": "sbx/tests/test_api.py",
+   "summary": "Pytest suite exercising the FastAPI endpoints with a TestClient and monkeypatched node agent, covering create/list/get/delete lifecycle, exec responses and errors, and file read/write round-trips.",
+   "tags": [
+    "test",
+    "api-handler",
+    "integration-test",
+    "fastapi",
+    "mocking"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "file:sbx/tests/test_db.py",
+   "type": "file",
+   "name": "test_db.py",
+   "filePath": "sbx/tests/test_db.py",
+   "summary": "Pytest suite for the SQLite state layer verifying schema consistency with the node agent's slots table, WAL mode, insert/state transitions, timestamps, and list ordering.",
+   "tags": [
+    "test",
+    "database",
+    "sqlite",
+    "unit-test"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/api/models.py:ip_for_slot",
+   "type": "function",
+   "name": "ip_for_slot",
+   "filePath": "sbx/api/models.py",
+   "lineRange": [
+    67,
+    71
+   ],
+   "summary": "Returns the guest IP address for a network slot number, or None when the sandbox has no slot.",
+   "tags": [
+    "utility",
+    "networking",
+    "mapping"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:client",
+   "type": "function",
+   "name": "client",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    18,
+    22
+   ],
+   "summary": "Pytest fixture providing a FastAPI TestClient backed by a temporary state database.",
+   "tags": [
+    "test",
+    "fixture",
+    "setup"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_create_returns_a_running_sandbox",
+   "type": "function",
+   "name": "test_create_returns_a_running_sandbox",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    31,
+    54
+   ],
+   "summary": "Verifies that create returns a running sandbox.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_two_creates_get_different_ids",
+   "type": "function",
+   "name": "test_two_creates_get_different_ids",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    57,
+    78
+   ],
+   "summary": "Verifies that two creates get different ids.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_failed_boot_marks_the_row_destroyed",
+   "type": "function",
+   "name": "test_failed_boot_marks_the_row_destroyed",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    81,
+    93
+   ],
+   "summary": "Verifies that failed boot marks the row destroyed.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_full_host_answers_503_and_marks_the_row_destroyed",
+   "type": "function",
+   "name": "test_full_host_answers_503_and_marks_the_row_destroyed",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    96,
+    107
+   ],
+   "summary": "Verifies that full host answers 503 and marks the row destroyed.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:boot_into_slot",
+   "type": "function",
+   "name": "boot_into_slot",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    110,
+    119
+   ],
+   "summary": "Test helper that fakes a node-agent boot, claiming a slot and returning a fake Sandbox.",
+   "tags": [
+    "test",
+    "helper",
+    "mocking"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_list_shows_a_running_sandbox",
+   "type": "function",
+   "name": "test_list_shows_a_running_sandbox",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    129,
+    146
+   ],
+   "summary": "Verifies that list shows a running sandbox.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_list_keeps_destroyed_rows_oldest_first",
+   "type": "function",
+   "name": "test_list_keeps_destroyed_rows_oldest_first",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    149,
+    179
+   ],
+   "summary": "Verifies that list keeps destroyed rows oldest first.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_get_returns_one_running_sandbox",
+   "type": "function",
+   "name": "test_get_returns_one_running_sandbox",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    182,
+    195
+   ],
+   "summary": "Verifies that get returns one running sandbox.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_get_destroyed_sandbox_is_still_found",
+   "type": "function",
+   "name": "test_get_destroyed_sandbox_is_still_found",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    205,
+    219
+   ],
+   "summary": "Verifies that get destroyed sandbox is still found.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_delete_tears_down_a_running_sandbox_once",
+   "type": "function",
+   "name": "test_delete_tears_down_a_running_sandbox_once",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    231,
+    251
+   ],
+   "summary": "Verifies that delete tears down a running sandbox once.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_delete_skips_a_sandbox_that_is_already_destroyed",
+   "type": "function",
+   "name": "test_delete_skips_a_sandbox_that_is_already_destroyed",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    265,
+    280
+   ],
+   "summary": "Verifies that delete skips a sandbox that is already destroyed.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_delete_tears_down_a_sandbox_that_is_still_starting",
+   "type": "function",
+   "name": "test_delete_tears_down_a_sandbox_that_is_still_starting",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    283,
+    294
+   ],
+   "summary": "Verifies that delete tears down a sandbox that is still starting.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:scripted_exec",
+   "type": "function",
+   "name": "scripted_exec",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    303,
+    314
+   ],
+   "summary": "Builds a fake node_agent.exec that records calls and returns a scripted result.",
+   "tags": [
+    "test",
+    "helper",
+    "mocking"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_exec_returns_a_finished_command",
+   "type": "function",
+   "name": "test_exec_returns_a_finished_command",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    324,
+    349
+   ],
+   "summary": "Verifies that exec returns a finished command.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_exec_returns_a_pid_for_a_background_command",
+   "type": "function",
+   "name": "test_exec_returns_a_pid_for_a_background_command",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    352,
+    365
+   ],
+   "summary": "Verifies that exec returns a pid for a background command.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_exec_reports_a_command_timeout_in_the_body",
+   "type": "function",
+   "name": "test_exec_reports_a_command_timeout_in_the_body",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    368,
+    384
+   ],
+   "summary": "Verifies that exec reports a command timeout in the body.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_exec_rejects_a_sandbox_that_is_not_running",
+   "type": "function",
+   "name": "test_exec_rejects_a_sandbox_that_is_not_running",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    398,
+    418
+   ],
+   "summary": "Verifies that exec rejects a sandbox that is not running.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_exec_rejects_a_request_that_breaks_the_type",
+   "type": "function",
+   "name": "test_exec_rejects_a_request_that_breaks_the_type",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    421,
+    434
+   ],
+   "summary": "Verifies that exec rejects a request that breaks the type.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_exec_passes_a_guest_client_error_through",
+   "type": "function",
+   "name": "test_exec_passes_a_guest_client_error_through",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    437,
+    450
+   ],
+   "summary": "Verifies that exec passes a guest client error through.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_exec_turns_a_dead_guest_into_bad_gateway",
+   "type": "function",
+   "name": "test_exec_turns_a_dead_guest_into_bad_gateway",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    453,
+    463
+   ],
+   "summary": "Verifies that exec turns a dead guest into bad gateway.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_write_then_read_round_trips_the_file",
+   "type": "function",
+   "name": "test_write_then_read_round_trips_the_file",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    482,
+    503
+   ],
+   "summary": "Verifies that write then read round trips the file.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_write_replaces_the_old_text",
+   "type": "function",
+   "name": "test_write_replaces_the_old_text",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    506,
+    518
+   ],
+   "summary": "Verifies that write replaces the old text.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_read_missing_file_is_not_found",
+   "type": "function",
+   "name": "test_read_missing_file_is_not_found",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    521,
+    532
+   ],
+   "summary": "Verifies that read missing file is not found.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_files_unknown_sandbox_is_not_found",
+   "type": "function",
+   "name": "test_files_unknown_sandbox_is_not_found",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    535,
+    551
+   ],
+   "summary": "Verifies that files unknown sandbox is not found.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_files_reject_a_sandbox_that_is_not_running",
+   "type": "function",
+   "name": "test_files_reject_a_sandbox_that_is_not_running",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    554,
+    579
+   ],
+   "summary": "Verifies that files reject a sandbox that is not running.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_files_require_a_path",
+   "type": "function",
+   "name": "test_files_require_a_path",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    582,
+    593
+   ],
+   "summary": "Verifies that files require a path.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_write_passes_a_guest_client_error_through",
+   "type": "function",
+   "name": "test_write_passes_a_guest_client_error_through",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    596,
+    610
+   ],
+   "summary": "Verifies that write passes a guest client error through.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_read_turns_a_dead_guest_into_bad_gateway",
+   "type": "function",
+   "name": "test_read_turns_a_dead_guest_into_bad_gateway",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    613,
+    626
+   ],
+   "summary": "Verifies that read turns a dead guest into bad gateway.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_api.py:test_write_rejects_bytes_that_are_not_text",
+   "type": "function",
+   "name": "test_write_rejects_bytes_that_are_not_text",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    629,
+    642
+   ],
+   "summary": "Verifies that write rejects bytes that are not text.",
+   "tags": [
+    "test",
+    "test-case",
+    "api"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_db.py:temp_db",
+   "type": "function",
+   "name": "temp_db",
+   "filePath": "sbx/tests/test_db.py",
+   "lineRange": [
+    18,
+    21
+   ],
+   "summary": "Autouse fixture pointing SBX_DB at a fresh temporary database with tables created.",
+   "tags": [
+    "test",
+    "fixture",
+    "setup"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_db.py:test_list_returns_every_sandbox_oldest_first_with_slots",
+   "type": "function",
+   "name": "test_list_returns_every_sandbox_oldest_first_with_slots",
+   "filePath": "sbx/tests/test_db.py",
+   "lineRange": [
+    105,
+    114
+   ],
+   "summary": "Verifies that list returns every sandbox oldest first with slots.",
+   "tags": [
+    "test",
+    "test-case",
+    "database"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/api/models.py:SandboxState",
+   "type": "class",
+   "name": "SandboxState",
+   "filePath": "sbx/api/models.py",
+   "lineRange": [
+    20,
+    25
+   ],
+   "summary": "String enum of sandbox lifecycle states, kept in sync with the CHECK constraint in db/schema.sql.",
+   "tags": [
+    "data-model",
+    "enum",
+    "state"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/api/models.py:SandboxRow",
+   "type": "class",
+   "name": "SandboxRow",
+   "filePath": "sbx/api/models.py",
+   "lineRange": [
+    32,
+    39
+   ],
+   "summary": "Pydantic model for a sandbox as stored in state.db, including its optional slot number and timestamps.",
+   "tags": [
+    "data-model",
+    "database",
+    "pydantic"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/api/models.py:SandboxInfo",
+   "type": "class",
+   "name": "SandboxInfo",
+   "filePath": "sbx/api/models.py",
+   "lineRange": [
+    46,
+    64
+   ],
+   "summary": "Client-facing sandbox view that replaces the slot number with a reachable IP; built from a row via from_row.",
+   "tags": [
+    "data-model",
+    "serialization",
+    "pydantic"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/api/models.py:CreateSandboxResponse",
+   "type": "class",
+   "name": "CreateSandboxResponse",
+   "filePath": "sbx/api/models.py",
+   "lineRange": [
+    74,
+    77
+   ],
+   "summary": "Response model for sandbox creation including boot timing.",
+   "tags": [
+    "data-model",
+    "response",
+    "pydantic"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/api/models.py:SandboxListResponse",
+   "type": "class",
+   "name": "SandboxListResponse",
+   "filePath": "sbx/api/models.py",
+   "lineRange": [
+    80,
+    83
+   ],
+   "summary": "Response model wrapping a list of SandboxInfo entries.",
+   "tags": [
+    "data-model",
+    "response",
+    "pydantic"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/api/models.py:ExecuteRequest",
+   "type": "class",
+   "name": "ExecuteRequest",
+   "filePath": "sbx/api/models.py",
+   "lineRange": [
+    90,
+    110
+   ],
+   "summary": "Validated exec request with command, working directory, background flag, and bounded timeout.",
+   "tags": [
+    "data-model",
+    "validation",
+    "request"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/api/models.py:ExecuteResponse",
+   "type": "class",
+   "name": "ExecuteResponse",
+   "filePath": "sbx/api/models.py",
+   "lineRange": [
+    113,
+    119
+   ],
+   "summary": "Response model for a finished command's exit code and output.",
+   "tags": [
+    "data-model",
+    "response",
+    "exec"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/api/models.py:ExecuteBackgroundResponse",
+   "type": "class",
+   "name": "ExecuteBackgroundResponse",
+   "filePath": "sbx/api/models.py",
+   "lineRange": [
+    122,
+    125
+   ],
+   "summary": "Response model carrying the pid of a background command.",
+   "tags": [
+    "data-model",
+    "response",
+    "exec"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/tests/test_api.py:MemoryFiles",
+   "type": "class",
+   "name": "MemoryFiles",
+   "filePath": "sbx/tests/test_api.py",
+   "lineRange": [
+    466,
+    479
+   ],
+   "summary": "In-memory fake of the guest filesystem used to stub node-agent read_file/write_file in file endpoint tests.",
+   "tags": [
+    "test",
+    "test-double",
+    "fake"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:sbx/client/client.py",
+   "type": "file",
+   "name": "client.py",
+   "filePath": "sbx/client/client.py",
+   "summary": "Interactive example coding agent that boots a sandbox via the SDK, runs an OpenAI tool-calling chat loop from terminal input, and dispatches the model's run_command/read_file/write_file calls into the sandbox, destroying it on exit.",
+   "tags": [
+    "entry-point",
+    "agent-loop",
+    "llm-client",
+    "cli"
+   ],
+   "complexity": "moderate",
+   "languageNotes": "Uses the walrus operator in the input loop and try/finally to guarantee sandbox cleanup even on Ctrl+C."
+  },
+  {
+   "id": "function:sbx/client/client.py:run_tool",
+   "type": "function",
+   "name": "run_tool",
+   "filePath": "sbx/client/client.py",
+   "lineRange": [
+    31,
+    59
+   ],
+   "summary": "Dispatches a single model tool call to the sandbox (exec, read_file or write_file), logs a short preview, and returns the result as text for the model.",
+   "tags": [
+    "tool-dispatch",
+    "event-handler",
+    "sandbox-io"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/client/client.py:main",
+   "type": "function",
+   "name": "main",
+   "filePath": "sbx/client/client.py",
+   "lineRange": [
+    69,
+    118
+   ],
+   "summary": "Creates a sandbox and runs the REPL agent loop: appends user tasks, calls the OpenAI chat API with tools up to MAX_STEPS, executes tool calls, and always destroys the sandbox afterwards.",
+   "tags": [
+    "entry-point",
+    "agent-loop",
+    "llm-client"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:sbx/client/tools.py",
+   "type": "file",
+   "name": "tools.py",
+   "filePath": "sbx/client/tools.py",
+   "summary": "Defines the OpenAI function-calling tool schemas (run_command, read_file, write_file) that the example agent exposes to the model, parameterized by the working directory.",
+   "tags": [
+    "tool-schema",
+    "llm-client",
+    "configuration",
+    "factory"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/client/tools.py:build_tools",
+   "type": "function",
+   "name": "build_tools",
+   "filePath": "sbx/client/tools.py",
+   "lineRange": [
+    1,
+    53
+   ],
+   "summary": "Builds the list of JSON-schema tool definitions for running commands and reading/writing files, embedding the workdir path rules in their descriptions.",
+   "tags": [
+    "factory",
+    "tool-schema",
+    "utility"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:sbx/sdk/sandbox.py",
+   "type": "file",
+   "name": "sandbox.py",
+   "filePath": "sbx/sdk/sandbox.py",
+   "summary": "Python SDK for the sandbox HTTP API: a Sandbox class wrapping create, exec, file read/write and destroy endpoints via httpx, with SandboxError raised on API error statuses.",
+   "tags": [
+    "sdk",
+    "api-client",
+    "service",
+    "http"
+   ],
+   "complexity": "moderate",
+   "languageNotes": "Uses a @classmethod factory (Sandbox.create) alongside a plain constructor for attaching to existing sandboxes, and per-operation httpx timeouts."
+  },
+  {
+   "id": "class:sbx/sdk/sandbox.py:SandboxError",
+   "type": "class",
+   "name": "SandboxError",
+   "filePath": "sbx/sdk/sandbox.py",
+   "lineRange": [
+    15,
+    26
+   ],
+   "summary": "Exception carrying the HTTP status code and detail message returned by the sandbox API on errors.",
+   "tags": [
+    "error-handling",
+    "exception",
+    "data-model"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/sdk/sandbox.py:_call_api",
+   "type": "function",
+   "name": "_call_api",
+   "filePath": "sbx/sdk/sandbox.py",
+   "lineRange": [
+    29,
+    62
+   ],
+   "summary": "Sends one HTTP request to the sandbox API with a timeout and converts 4xx/5xx responses into SandboxError using the API's detail message.",
+   "tags": [
+    "http",
+    "utility",
+    "error-handling"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/sdk/sandbox.py:Sandbox",
+   "type": "class",
+   "name": "Sandbox",
+   "filePath": "sbx/sdk/sandbox.py",
+   "lineRange": [
+    65,
+    216
+   ],
+   "summary": "Client handle for one sandbox VM, offering create, exec (foreground or background), read_file, write_file and destroy methods mapped onto REST endpoints.",
+   "tags": [
+    "sdk",
+    "api-client",
+    "service",
+    "factory"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:sbx/guest_agent/agent_types.py",
+   "type": "file",
+   "name": "agent_types.py",
+   "filePath": "sbx/guest_agent/agent_types.py",
+   "summary": "Defines the TypedDict response shapes returned by the in-VM guest agent's /exec endpoint for foreground and background command runs.",
+   "tags": [
+    "type-definition",
+    "data-model",
+    "guest-agent"
+   ],
+   "complexity": "simple",
+   "languageNotes": "Uses typing.TypedDict to give static types to plain dicts that are serialized directly to JSON."
+  },
+  {
+   "id": "class:sbx/guest_agent/agent_types.py:ExecResult",
+   "type": "class",
+   "name": "ExecResult",
+   "filePath": "sbx/guest_agent/agent_types.py",
+   "lineRange": [
+    4,
+    9
+   ],
+   "summary": "TypedDict for a foreground /exec result: exit code (124 on timeout), captured stdout/stderr, and a timed_out flag.",
+   "tags": [
+    "type-definition",
+    "data-model",
+    "exec"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/guest_agent/agent_types.py:BackgroundResult",
+   "type": "class",
+   "name": "BackgroundResult",
+   "filePath": "sbx/guest_agent/agent_types.py",
+   "lineRange": [
+    12,
+    14
+   ],
+   "summary": "TypedDict for a background /exec result containing only the spawned process pid, whose output goes to /tmp/bg-<pid>.log.",
+   "tags": [
+    "type-definition",
+    "data-model",
+    "exec"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:sbx/guest_agent/guest_agent.py",
+   "type": "file",
+   "name": "guest_agent.py",
+   "filePath": "sbx/guest_agent/guest_agent.py",
+   "summary": "Standalone HTTP server that runs inside each Firecracker microVM, exposing /health, /exec, and /files endpoints so the host can run shell commands and read/write files in the sandbox.",
+   "tags": [
+    "entry-point",
+    "api-handler",
+    "guest-agent",
+    "http-server"
+   ],
+   "complexity": "moderate",
+   "languageNotes": "Built only on the standard library (http.server.ThreadingHTTPServer with daemon threads), with a dict-based (method, path) routing table mapping to unbound handler methods."
+  },
+  {
+   "id": "class:sbx/guest_agent/guest_agent.py:BadRequest",
+   "type": "class",
+   "name": "BadRequest",
+   "filePath": "sbx/guest_agent/guest_agent.py",
+   "lineRange": [
+    21,
+    22
+   ],
+   "summary": "Exception signalling a client error; the router converts it into a 400 response with a JSON error message.",
+   "tags": [
+    "error-handling",
+    "validation",
+    "exception"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/guest_agent/guest_agent.py:Handler",
+   "type": "class",
+   "name": "Handler",
+   "filePath": "sbx/guest_agent/guest_agent.py",
+   "lineRange": [
+    26,
+    143
+   ],
+   "summary": "BaseHTTPRequestHandler subclass implementing the guest agent endpoints (health, exec, read/write files), request routing with 400/404/500 error mapping, and JSON/body/path-parameter parsing helpers.",
+   "tags": [
+    "api-handler",
+    "http-server",
+    "routing",
+    "guest-agent"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:sbx/guest_agent/helpers.py",
+   "type": "file",
+   "name": "helpers.py",
+   "filePath": "sbx/guest_agent/helpers.py",
+   "summary": "Process and file helpers for the guest agent: runs shell commands in the foreground with timeout and process-group kill, spawns background jobs logging to /tmp/bg-<pid>.log, and writes files atomically.",
+   "tags": [
+    "utility",
+    "process-management",
+    "file-io",
+    "guest-agent"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/guest_agent/helpers.py:run_foreground",
+   "type": "function",
+   "name": "run_foreground",
+   "filePath": "sbx/guest_agent/helpers.py",
+   "lineRange": [
+    15,
+    54
+   ],
+   "summary": "Runs a shell command in a new session, waits up to a timeout, kills the whole process group on timeout, and returns exit code, stdout, stderr, and timed_out.",
+   "tags": [
+    "process-management",
+    "subprocess",
+    "timeout"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/guest_agent/helpers.py:run_background",
+   "type": "function",
+   "name": "run_background",
+   "filePath": "sbx/guest_agent/helpers.py",
+   "lineRange": [
+    57,
+    89
+   ],
+   "summary": "Starts a detached shell command with output redirected to a temp log renamed to /tmp/bg-<pid>.log, reaps it via a daemon thread, and returns its pid immediately.",
+   "tags": [
+    "process-management",
+    "subprocess",
+    "background-job"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/guest_agent/helpers.py:write_file_atomically",
+   "type": "function",
+   "name": "write_file_atomically",
+   "filePath": "sbx/guest_agent/helpers.py",
+   "lineRange": [
+    94,
+    121
+   ],
+   "summary": "Writes bytes to a path by creating parent folders, writing to a same-directory temp file, setting 0644 permissions, and atomically replacing the target, cleaning up on failure.",
+   "tags": [
+    "file-io",
+    "atomic-write",
+    "utility"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:sbx/node_agent.py",
+   "type": "file",
+   "name": "node_agent.py",
+   "filePath": "sbx/node_agent.py",
+   "summary": "Host-side node agent that creates, boots, tracks, and destroys Firecracker microVM sandboxes (disk copy, network namespace, cgroup, VM config via the Firecracker socket API), allocates network slots in SQLite, and proxies exec/file operations to each guest agent over HTTP.",
+   "tags": [
+    "service",
+    "virtualization",
+    "firecracker",
+    "resource-management",
+    "core-logic",
+    "tested"
+   ],
+   "complexity": "complex",
+   "languageNotes": "Slot allocation relies on a SQLite PRIMARY KEY plus WAL mode so a single INSERT acts as an atomic check-and-claim across concurrent callers."
+  },
+  {
+   "id": "file:sbx/tests/test_node_agent.py",
+   "type": "file",
+   "name": "test_node_agent.py",
+   "filePath": "sbx/tests/test_node_agent.py",
+   "summary": "End-to-end integration tests (root and /dev/kvm only) that boot real sandboxes to verify command execution, filesystem isolation, slot reuse under new IDs, API-server helper behavior, and that no namespaces, cgroups, processes, or files are left behind.",
+   "tags": [
+    "test",
+    "integration-test",
+    "firecracker",
+    "cleanup"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:sbx/tests/test_node_agent_helpers.py",
+   "type": "file",
+   "name": "test_node_agent_helpers.py",
+   "filePath": "sbx/tests/test_node_agent_helpers.py",
+   "summary": "Unit tests for node agent helpers that run without KVM: sandbox ID generation/validation, SQLite slot claiming (including concurrent claims), PID handling, and create/destroy cleanup ordering using monkeypatched steps.",
+   "tags": [
+    "test",
+    "unit-test",
+    "concurrency",
+    "sqlite"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "class:sbx/node_agent.py:NoFreeSlotsError",
+   "type": "class",
+   "name": "NoFreeSlotsError",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    67,
+    68
+   ],
+   "summary": "Exception raised when all 250 sandbox network slots are in use and no new sandbox can start.",
+   "tags": [
+    "error-handling",
+    "exception",
+    "capacity"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "class:sbx/node_agent.py:Sandbox",
+   "type": "class",
+   "name": "Sandbox",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    75,
+    91
+   ],
+   "summary": "Pydantic record returned by create_sandbox holding the sandbox ID, network slot, guest IP, Firecracker PID, and boot time.",
+   "tags": [
+    "data-model",
+    "pydantic",
+    "sandbox"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:new_sandbox_id",
+   "type": "function",
+   "name": "new_sandbox_id",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    104,
+    106
+   ],
+   "summary": "Generates a new permanent, never-reused sandbox ID of the form sbx_<32 hex chars>.",
+   "tags": [
+    "utility",
+    "id-generation",
+    "sandbox"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:validate_sandbox_id",
+   "type": "function",
+   "name": "validate_sandbox_id",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    109,
+    112
+   ],
+   "summary": "Rejects sandbox IDs that do not match the strict sbx_<hex> pattern, guarding against path traversal.",
+   "tags": [
+    "validation",
+    "security",
+    "sandbox"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:wait_until",
+   "type": "function",
+   "name": "wait_until",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    164,
+    172
+   ],
+   "summary": "Polls a condition until it is true or a timeout expires, raising with a description of what was awaited.",
+   "tags": [
+    "utility",
+    "polling",
+    "timeout"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:open_db",
+   "type": "function",
+   "name": "open_db",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    215,
+    225
+   ],
+   "summary": "Opens the node agent's SQLite state database in autocommit WAL mode with a busy timeout and ensures the slots table exists.",
+   "tags": [
+    "database",
+    "sqlite",
+    "state"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:claim_free_slot",
+   "type": "function",
+   "name": "claim_free_slot",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    228,
+    239
+   ],
+   "summary": "Atomically reserves the lowest free network slot for a sandbox by inserting into the slots table, raising NoFreeSlotsError when full.",
+   "tags": [
+    "database",
+    "concurrency",
+    "resource-allocation"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:find_slot",
+   "type": "function",
+   "name": "find_slot",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    242,
+    246
+   ],
+   "summary": "Returns the network slot held by a sandbox, or None if it holds none.",
+   "tags": [
+    "database",
+    "lookup",
+    "slots"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:release_slot",
+   "type": "function",
+   "name": "release_slot",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    249,
+    252
+   ],
+   "summary": "Frees a slot only if the given sandbox still holds it.",
+   "tags": [
+    "database",
+    "slots",
+    "cleanup"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:slot_holders",
+   "type": "function",
+   "name": "slot_holders",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    255,
+    258
+   ],
+   "summary": "Lists the IDs of every sandbox currently holding a slot.",
+   "tags": [
+    "database",
+    "slots",
+    "query"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:require_slot",
+   "type": "function",
+   "name": "require_slot",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    261,
+    267
+   ],
+   "summary": "Returns a sandbox's slot or raises LookupError for unknown sandboxes (mapped to 404 by the API).",
+   "tags": [
+    "validation",
+    "lookup",
+    "slots"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:start_firecracker",
+   "type": "function",
+   "name": "start_firecracker",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    301,
+    312
+   ],
+   "summary": "Launches the Firecracker process inside the sandbox's network namespace in its own session, logging console output to a file.",
+   "tags": [
+    "process-management",
+    "firecracker",
+    "subprocess"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:configure_and_boot_vm",
+   "type": "function",
+   "name": "configure_and_boot_vm",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    396,
+    403
+   ],
+   "summary": "Configures boot source, root drive, machine size, and network over the Firecracker socket API, then starts the VM.",
+   "tags": [
+    "firecracker",
+    "vm-config",
+    "boot"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:wait_for_guest_agent",
+   "type": "function",
+   "name": "wait_for_guest_agent",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    425,
+    432
+   ],
+   "summary": "Waits until the guest agent inside the VM answers its /health endpoint.",
+   "tags": [
+    "health-check",
+    "polling",
+    "guest-agent"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:create_sandbox",
+   "type": "function",
+   "name": "create_sandbox",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    439,
+    472
+   ],
+   "summary": "Orchestrates full sandbox creation: validate ID, claim slot, copy disk, create network and cgroup, start and configure Firecracker, wait for guest agent; destroys partial state on any failure.",
+   "tags": [
+    "orchestration",
+    "lifecycle",
+    "firecracker",
+    "entry-point"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/node_agent.py:wait_for_exit",
+   "type": "function",
+   "name": "wait_for_exit",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    502,
+    512
+   ],
+   "summary": "Waits for a process to exit within a timeout, reporting whether it is gone.",
+   "tags": [
+    "process-management",
+    "polling",
+    "timeout"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:kill_firecracker",
+   "type": "function",
+   "name": "kill_firecracker",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    515,
+    524
+   ],
+   "summary": "Terminates a sandbox's Firecracker process if its saved PID still belongs to that sandbox, escalating from SIGTERM to SIGKILL.",
+   "tags": [
+    "process-management",
+    "cleanup",
+    "signals"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:destroy_sandbox",
+   "type": "function",
+   "name": "destroy_sandbox",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    553,
+    566
+   ],
+   "summary": "Tears down a sandbox in a safe order: kill process, remove cgroup, delete network then release slot, and finally remove its folder; safe on half-created sandboxes.",
+   "tags": [
+    "orchestration",
+    "lifecycle",
+    "cleanup"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:is_sandbox_running",
+   "type": "function",
+   "name": "is_sandbox_running",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    580,
+    584
+   ],
+   "summary": "Reports whether a sandbox's Firecracker process is still alive, used by the API server for reconciliation.",
+   "tags": [
+    "status",
+    "process-management",
+    "reconciliation"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:list_host_sandboxes",
+   "type": "function",
+   "name": "list_host_sandboxes",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    587,
+    592
+   ],
+   "summary": "Returns IDs of every sandbox with a folder or a held slot on the host, so the API server can find orphans.",
+   "tags": [
+    "reconciliation",
+    "inventory",
+    "host-state"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:exec",
+   "type": "function",
+   "name": "exec",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    600,
+    610
+   ],
+   "summary": "Runs a shell command in a sandbox via the guest agent's /exec endpoint, returning output or a background PID.",
+   "tags": [
+    "api-client",
+    "guest-agent",
+    "command-execution"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:read_file",
+   "type": "function",
+   "name": "read_file",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    613,
+    619
+   ],
+   "summary": "Reads a file from inside a sandbox via the guest agent, raising FileNotFoundError on 404.",
+   "tags": [
+    "api-client",
+    "guest-agent",
+    "file-io"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:write_file",
+   "type": "function",
+   "name": "write_file",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    622,
+    629
+   ],
+   "summary": "Writes text content to a file inside a sandbox via the guest agent's /files endpoint.",
+   "tags": [
+    "api-client",
+    "guest-agent",
+    "file-io"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_node_agent.py:test_two_sandboxes_run_commands_and_are_isolated",
+   "type": "function",
+   "name": "test_two_sandboxes_run_commands_and_are_isolated",
+   "filePath": "sbx/tests/test_node_agent.py",
+   "lineRange": [
+    18,
+    35
+   ],
+   "summary": "Boots two real sandboxes and verifies each runs commands and cannot see the other's files.",
+   "tags": [
+    "test",
+    "integration-test",
+    "isolation"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_node_agent.py:test_slot_is_reused_under_a_new_id",
+   "type": "function",
+   "name": "test_slot_is_reused_under_a_new_id",
+   "filePath": "sbx/tests/test_node_agent.py",
+   "lineRange": [
+    38,
+    50
+   ],
+   "summary": "Verifies a destroyed sandbox's slot is reused by the next sandbox while the old ID is no longer reachable.",
+   "tags": [
+    "test",
+    "integration-test",
+    "slots"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_node_agent.py:test_api_server_helpers",
+   "type": "function",
+   "name": "test_api_server_helpers",
+   "filePath": "sbx/tests/test_node_agent.py",
+   "lineRange": [
+    53,
+    66
+   ],
+   "summary": "Checks helpers the API server relies on: caller-supplied IDs, running status, host listing, and Firecracker running in its own session.",
+   "tags": [
+    "test",
+    "integration-test",
+    "reconciliation"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_node_agent.py:test_nothing_is_left_behind",
+   "type": "function",
+   "name": "test_nothing_is_left_behind",
+   "filePath": "sbx/tests/test_node_agent.py",
+   "lineRange": [
+    69,
+    92
+   ],
+   "summary": "Asserts that after earlier tests no network namespaces, cgroups, Firecracker processes, files, or slots remain on the host.",
+   "tags": [
+    "test",
+    "integration-test",
+    "cleanup"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_node_agent_helpers.py:test_concurrent_claims_never_share_a_slot",
+   "type": "function",
+   "name": "test_concurrent_claims_never_share_a_slot",
+   "filePath": "sbx/tests/test_node_agent_helpers.py",
+   "lineRange": [
+    77,
+    93
+   ],
+   "summary": "Releases 20 threads at once to claim slots and asserts they all receive distinct consecutive slots.",
+   "tags": [
+    "test",
+    "concurrency",
+    "slots"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_node_agent_helpers.py:test_create_sandbox_cleans_up_when_a_step_fails",
+   "type": "function",
+   "name": "test_create_sandbox_cleans_up_when_a_step_fails",
+   "filePath": "sbx/tests/test_node_agent_helpers.py",
+   "lineRange": [
+    151,
+    166
+   ],
+   "summary": "Monkeypatches a failing network step and verifies create_sandbox calls destroy_sandbox and re-raises the error.",
+   "tags": [
+    "test",
+    "error-handling",
+    "lifecycle"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_node_agent_helpers.py:test_create_sandbox_uses_the_id_it_is_given",
+   "type": "function",
+   "name": "test_create_sandbox_uses_the_id_it_is_given",
+   "filePath": "sbx/tests/test_node_agent_helpers.py",
+   "lineRange": [
+    169,
+    182
+   ],
+   "summary": "Verifies create_sandbox uses a caller-provided ID, as the API server needs.",
+   "tags": [
+    "test",
+    "lifecycle",
+    "id"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_node_agent_helpers.py:test_destroy_frees_slot_only_after_network_is_deleted",
+   "type": "function",
+   "name": "test_destroy_frees_slot_only_after_network_is_deleted",
+   "filePath": "sbx/tests/test_node_agent_helpers.py",
+   "lineRange": [
+    195,
+    211
+   ],
+   "summary": "Verifies destroy_sandbox still holds the slot while deleting the network and frees it afterwards.",
+   "tags": [
+    "test",
+    "ordering",
+    "cleanup"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/tests/test_node_agent_helpers.py:test_destroy_keeps_the_slot_if_network_delete_fails",
+   "type": "function",
+   "name": "test_destroy_keeps_the_slot_if_network_delete_fails",
+   "filePath": "sbx/tests/test_node_agent_helpers.py",
+   "lineRange": [
+    214,
+    228
+   ],
+   "summary": "Verifies the slot stays claimed if network deletion fails, preventing collisions.",
+   "tags": [
+    "test",
+    "error-handling",
+    "slots"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:sbx/scripts/install_guest_agent.sh",
+   "type": "file",
+   "name": "install_guest_agent.sh",
+   "filePath": "sbx/scripts/install_guest_agent.sh",
+   "summary": "Bakes the Python guest agent into the Firecracker base rootfs image as a systemd service that configures VM networking at boot, with verify and live-VM HTTP test subcommands.",
+   "tags": [
+    "script",
+    "deployment",
+    "guest-agent",
+    "firecracker",
+    "image-build"
+   ],
+   "complexity": "complex",
+   "languageNotes": "Bash subcommand dispatcher pattern (cmd_install/cmd_verify/cmd_test) with trap-guaranteed unmount of the loop-mounted ext4 image."
+  },
+  {
+   "id": "function:sbx/scripts/install_guest_agent.sh:cmd_install",
+   "type": "function",
+   "name": "cmd_install",
+   "filePath": "sbx/scripts/install_guest_agent.sh",
+   "lineRange": [
+    99,
+    133
+   ],
+   "summary": "Validates agent Python files, mounts rootfs.ext4 read-write, copies the agent to /opt/guest_agent, writes and enables guest-agent.service, then unmounts.",
+   "tags": [
+    "installer",
+    "image-build",
+    "systemd"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/scripts/install_guest_agent.sh:cmd_verify",
+   "type": "function",
+   "name": "cmd_verify",
+   "filePath": "sbx/scripts/install_guest_agent.sh",
+   "lineRange": [
+    150,
+    169
+   ],
+   "summary": "Read-only checklist confirming the base image contains an up-to-date guest agent and matching enabled systemd unit.",
+   "tags": [
+    "validation",
+    "checklist",
+    "image-build"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/scripts/install_guest_agent.sh:cmd_test",
+   "type": "function",
+   "name": "cmd_test",
+   "filePath": "sbx/scripts/install_guest_agent.sh",
+   "lineRange": [
+    198,
+    226
+   ],
+   "summary": "Exercises the running guest agent in VM N over HTTP: health, exec, file read/write, status codes, long-running and background jobs.",
+   "tags": [
+    "test",
+    "smoke-test",
+    "http-client"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:sbx/scripts/netns.sh",
+   "type": "file",
+   "name": "netns.sh",
+   "filePath": "sbx/scripts/netns.sh",
+   "summary": "Manual Milestone 1d tool that gives each Firecracker sandbox its own network namespace (shared tap0/172.16.0.2 inside, unique 10.201.0.N clone address on host) and boots, stops, verifies, lists and tears down VMs in them.",
+   "tags": [
+    "script",
+    "networking",
+    "network-namespace",
+    "firecracker",
+    "cli"
+   ],
+   "complexity": "complex",
+   "languageNotes": "Uses the Firecracker clone-networking pattern: per-namespace DNAT/SNAT so identical guest IPs coexist; idempotent iptables helpers via -C/-I and looped -D."
+  },
+  {
+   "id": "function:sbx/scripts/netns.sh:vars",
+   "type": "function",
+   "name": "vars",
+   "filePath": "sbx/scripts/netns.sh",
+   "lineRange": [
+    69,
+    80
+   ],
+   "summary": "Derives namespace, interface, IP and file path variables for sandbox slot N.",
+   "tags": [
+    "configuration",
+    "networking",
+    "helper"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/scripts/netns.sh:step3_veth",
+   "type": "function",
+   "name": "step3_veth",
+   "filePath": "sbx/scripts/netns.sh",
+   "lineRange": [
+    111,
+    120
+   ],
+   "summary": "Creates the host-to-namespace veth pair, assigns /30 addresses and sets the namespace default route.",
+   "tags": [
+    "networking",
+    "veth",
+    "setup"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/scripts/netns.sh:step5_host",
+   "type": "function",
+   "name": "step5_host",
+   "filePath": "sbx/scripts/netns.sh",
+   "lineRange": [
+    129,
+    139
+   ],
+   "summary": "Configures the host side: route to the clone address, IP forwarding and MASQUERADE for internet egress.",
+   "tags": [
+    "networking",
+    "nat",
+    "iptables"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/scripts/netns.sh:cmd_create",
+   "type": "function",
+   "name": "cmd_create",
+   "filePath": "sbx/scripts/netns.sh",
+   "lineRange": [
+    141,
+    155
+   ],
+   "summary": "Runs the five network setup steps to create namespace sbxN idempotently.",
+   "tags": [
+    "networking",
+    "setup",
+    "command"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/scripts/netns.sh:cmd_start",
+   "type": "function",
+   "name": "cmd_start",
+   "filePath": "sbx/scripts/netns.sh",
+   "lineRange": [
+    164,
+    198
+   ],
+   "summary": "Creates the namespace if needed, copies the base image, launches Firecracker inside the namespace and configures it via its API socket.",
+   "tags": [
+    "vm-lifecycle",
+    "firecracker",
+    "command"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "function:sbx/scripts/netns.sh:cmd_stop",
+   "type": "function",
+   "name": "cmd_stop",
+   "filePath": "sbx/scripts/netns.sh",
+   "lineRange": [
+    200,
+    211
+   ],
+   "summary": "Stops the Firecracker VM running in sbxN while keeping its network and disk.",
+   "tags": [
+    "vm-lifecycle",
+    "command",
+    "cleanup"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/scripts/netns.sh:cmd_verify",
+   "type": "function",
+   "name": "cmd_verify",
+   "filePath": "sbx/scripts/netns.sh",
+   "lineRange": [
+    243,
+    284
+   ],
+   "summary": "Checklist validating namespace, interfaces, routes, NAT rules, forwarding and guest reachability for slot N.",
+   "tags": [
+    "validation",
+    "checklist",
+    "networking"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "function:sbx/scripts/netns.sh:cmd_verify_deleted",
+   "type": "function",
+   "name": "cmd_verify_deleted",
+   "filePath": "sbx/scripts/netns.sh",
+   "lineRange": [
+    286,
+    296
+   ],
+   "summary": "Checks that no namespace, interface, route or rule remains for a deleted slot.",
+   "tags": [
+    "validation",
+    "cleanup",
+    "networking"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/scripts/netns.sh:main",
+   "type": "function",
+   "name": "main",
+   "filePath": "sbx/scripts/netns.sh",
+   "lineRange": [
+    321,
+    342
+   ],
+   "summary": "Parses the subcommand and slot argument and dispatches to the matching cmd_* function.",
+   "tags": [
+    "entry-point",
+    "cli",
+    "dispatcher"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:sbx/scripts/netns_create.sh",
+   "type": "file",
+   "name": "netns_create.sh",
+   "filePath": "sbx/scripts/netns_create.sh",
+   "summary": "Creates the per-slot network for sandbox N: namespace sbxN with tap0, veth pair to host, in-namespace SNAT/DNAT to clone address 10.201.0.N, and host routing plus MASQUERADE; invoked by node_agent.create_network().",
+   "tags": [
+    "script",
+    "networking",
+    "network-namespace",
+    "iptables",
+    "provisioning"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:sbx/scripts/netns_delete.sh",
+   "type": "file",
+   "name": "netns_delete.sh",
+   "filePath": "sbx/scripts/netns_delete.sh",
+   "summary": "Idempotently removes sandbox slot N's route, veth pair, namespace and conntrack entries, then fails loudly if anything remains so the slot is not reused; invoked by node_agent.delete_network().",
+   "tags": [
+    "script",
+    "networking",
+    "cleanup",
+    "network-namespace",
+    "idempotent"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:sbx/scripts/setup_host.sh",
+   "type": "file",
+   "name": "setup_host.sh",
+   "filePath": "sbx/scripts/setup_host.sh",
+   "summary": "One-time idempotent KVM host bootstrap: installs packages, checks KVM and cgroups v2, installs pinned Firecracker, downloads kernel, builds Ubuntu 24.04 base rootfs and SSH key, bakes in the guest agent, syncs Python deps with uv, and prints a checklist.",
+   "tags": [
+    "script",
+    "setup",
+    "infrastructure",
+    "firecracker",
+    "build-system"
+   ],
+   "complexity": "complex",
+   "languageNotes": "set -Eeuo pipefail with an EXIT trap that unmounts chroot bind mounts before deleting the temp build dir to avoid destroying host /dev."
+  },
+  {
+   "id": "function:sbx/scripts/setup_host.sh:cleanup",
+   "type": "function",
+   "name": "cleanup",
+   "filePath": "sbx/scripts/setup_host.sh",
+   "lineRange": [
+    61,
+    70
+   ],
+   "summary": "Trap handler that unmounts chroot bind mounts and only deletes the temp build folder if nothing remains mounted beneath it.",
+   "tags": [
+    "cleanup",
+    "safety",
+    "trap-handler"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "config:.env.example",
+   "type": "config",
+   "name": ".env.example",
+   "filePath": ".env.example",
+   "summary": "Template environment file declaring OPENAI_API_KEY for the example agent and SANDBOX_API, the SSH-tunneled URL where the SDK reaches the sandbox API on the GCP VM.",
+   "tags": [
+    "configuration",
+    "environment",
+    "secrets-template",
+    "sdk"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:.githooks/prepare-commit-msg",
+   "type": "file",
+   "name": "prepare-commit-msg",
+   "filePath": ".githooks/prepare-commit-msg",
+   "summary": "Git prepare-commit-msg hook that appends Co-authored-by trailers for the other team members (excluding the committer) when the message has none.",
+   "tags": [
+    "git-hook",
+    "script",
+    "development",
+    "automation"
+   ],
+   "complexity": "simple",
+   "languageNotes": "POSIX sh hook; filters the committer's own email out with grep -v and only appends trailers if none already exist."
+  },
+  {
+   "id": "file:.gitignore",
+   "type": "file",
+   "name": ".gitignore",
+   "filePath": ".gitignore",
+   "summary": "Allowlist-style ignore rules that ignore everything at the repo root except sbx/, README, githooks and .env.example, plus local SQLite databases, .env, virtualenvs and caches.",
+   "tags": [
+    "configuration",
+    "git",
+    "version-control"
+   ],
+   "complexity": "simple",
+   "languageNotes": "Uses a '/*' ignore-all pattern followed by '!' negations to allowlist only shared paths."
+  },
+  {
+   "id": "document:README.md",
+   "type": "document",
+   "name": "README.md",
+   "filePath": "README.md",
+   "summary": "Main project documentation covering repository layout, GCP host setup, client/test usage, and detailed design notes and tradeoffs for each milestone step: the node agent (1F), the FastAPI server with SQLite state and REST endpoints (1G), and the SDK and example agents (1H/I).",
+   "tags": [
+    "documentation",
+    "entry-point",
+    "overview",
+    "architecture",
+    "setup-guide"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "table:sbx/db/schema.sql",
+   "type": "table",
+   "name": "schema.sql",
+   "filePath": "sbx/db/schema.sql",
+   "summary": "Idempotent SQLite schema enabling WAL mode and creating the slots table (network slot per sandbox, owned by node_agent) and the sandboxes table (id, lifecycle state, timestamps, owned by the API server).",
+   "tags": [
+    "database",
+    "schema-definition",
+    "sqlite",
+    "migration"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "table:sbx/db/schema.sql:slots",
+   "type": "table",
+   "name": "slots",
+   "filePath": "sbx/db/schema.sql",
+   "lineRange": [
+    6,
+    9
+   ],
+   "summary": "Maps network slot numbers 1-250 to the sandbox holding them; a sandbox may hold at most one slot.",
+   "tags": [
+    "database",
+    "networking",
+    "resource-allocation"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "table:sbx/db/schema.sql:sandboxes",
+   "type": "table",
+   "name": "sandboxes",
+   "filePath": "sbx/db/schema.sql",
+   "lineRange": [
+    12,
+    17
+   ],
+   "summary": "One row per API-created sandbox with state constrained to starting/running/destroyed and unix-second created/updated timestamps; rows persist after destroy.",
+   "tags": [
+    "database",
+    "lifecycle",
+    "state-persistence"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "table:sbx/db/seed.sql",
+   "type": "table",
+   "name": "seed.sql",
+   "filePath": "sbx/db/seed.sql",
+   "summary": "Sample data for a local test database that, only when both tables are empty, inserts five sandboxes across all states and three slot assignments inside a single transaction.",
+   "tags": [
+    "database",
+    "seed-data",
+    "testing",
+    "sqlite"
+   ],
+   "complexity": "simple",
+   "languageNotes": "Uses a sqlite3 '.bail on' dot-command and a TEMP table to make the emptiness check once and gate both INSERT ... SELECT statements."
+  },
+  {
+   "id": "config:sbx/pyproject.toml",
+   "type": "config",
+   "name": "pyproject.toml",
+   "filePath": "sbx/pyproject.toml",
+   "summary": "Python project metadata for persistent-sandboxes (Python >=3.11) declaring FastAPI, uvicorn, httpx, pydantic, openai and python-dotenv dependencies, a pytest dev group, and pytest paths.",
+   "tags": [
+    "configuration",
+    "build-system",
+    "dependencies",
+    "python"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "document:sbx/tests/acceptance_agent.md",
+   "type": "document",
+   "name": "acceptance_agent.md",
+   "filePath": "sbx/tests/acceptance_agent.md",
+   "summary": "Manual Milestone 1 acceptance test across three terminals: set up the host, start the API, run the client agent on two tasks against an Express app in a sandbox, verify /health, check cleanup, and record boot time.",
+   "tags": [
+    "documentation",
+    "test",
+    "acceptance-test",
+    "manual-procedure"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:sbx/node_agent.py:guest_ip_for",
+   "type": "function",
+   "name": "guest_ip_for",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    120,
+    122
+   ],
+   "summary": "Returns the guest IP address (10.201.0.N) the host uses to reach the sandbox in slot N.",
+   "tags": [
+    "networking",
+    "helper"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:sbx/node_agent.py:db_path",
+   "type": "function",
+   "name": "db_path",
+   "filePath": "sbx/node_agent.py",
+   "lineRange": [
+    125,
+    127
+   ],
+   "summary": "Returns the SQLite state database path (SBX_DB env var or SANDBOXES_ROOT/state.db), as a function so tests can relocate it.",
+   "tags": [
+    "database",
+    "config",
+    "helper"
+   ],
+   "complexity": "simple"
+  }
+ ],
+ "edges": [
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "file:sbx/api/models.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "file:sbx/node_agent.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "file:sbx/api/__init__.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "file:sbx/api/db.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "file:sbx/api/models.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "file:sbx/node_agent.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "file:sbx/api/__init__.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "file:sbx/api/db.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "file:sbx/api/helpers.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "file:sbx/api/models.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "file:sbx/node_agent.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:connect",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:connect",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:make_db_folder",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:make_db_folder",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:create_tables",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:create_tables",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:now",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:now",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:to_sandbox_row",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:to_sandbox_row",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:insert_sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:insert_sandbox",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:set_state",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:set_state",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:get_sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:get_sandbox",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:list_sandboxes",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:list_sandboxes",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:list_live_sandboxes",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "function:sbx/api/db.py:list_live_sandboxes",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:require_sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:require_sandbox",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:require_running",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:require_running",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:boot_sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:boot_sandbox",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:build_create_response",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:build_create_response",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:is_destroyed",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:is_destroyed",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:tear_down",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:tear_down",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:guest_error_to_http",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:guest_error_to_http",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:run_command",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:run_command",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:to_execute_response",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:to_execute_response",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:to_background_response",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:to_background_response",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:fetch_file",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:fetch_file",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:text_from_body",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:text_from_body",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:store_file",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/helpers.py",
+   "target": "function:sbx/api/helpers.py:store_file",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:lifespan",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:lifespan",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:create_sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:create_sandbox",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:list_sandboxes",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:list_sandboxes",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:get_sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:get_sandbox",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:delete_sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:delete_sandbox",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:exec_command",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:exec_command",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:read_file",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:read_file",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:write_file",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "function:sbx/api/main.py:write_file",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:lifespan",
+   "target": "function:sbx/api/db.py:create_tables",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:create_sandbox",
+   "target": "function:sbx/node_agent.py:new_sandbox_id",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:create_sandbox",
+   "target": "function:sbx/api/db.py:insert_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:create_sandbox",
+   "target": "function:sbx/api/helpers.py:boot_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:create_sandbox",
+   "target": "function:sbx/api/db.py:set_state",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:create_sandbox",
+   "target": "function:sbx/api/helpers.py:build_create_response",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:list_sandboxes",
+   "target": "function:sbx/api/db.py:list_sandboxes",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:get_sandbox",
+   "target": "function:sbx/api/helpers.py:require_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:delete_sandbox",
+   "target": "function:sbx/api/helpers.py:require_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:delete_sandbox",
+   "target": "function:sbx/api/helpers.py:is_destroyed",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:delete_sandbox",
+   "target": "function:sbx/api/helpers.py:tear_down",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:exec_command",
+   "target": "function:sbx/api/helpers.py:require_running",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:exec_command",
+   "target": "function:sbx/api/helpers.py:run_command",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:exec_command",
+   "target": "function:sbx/api/helpers.py:to_background_response",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:exec_command",
+   "target": "function:sbx/api/helpers.py:to_execute_response",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:read_file",
+   "target": "function:sbx/api/helpers.py:require_running",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:read_file",
+   "target": "function:sbx/api/helpers.py:fetch_file",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:write_file",
+   "target": "function:sbx/api/helpers.py:require_running",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:write_file",
+   "target": "function:sbx/api/helpers.py:text_from_body",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/main.py:write_file",
+   "target": "function:sbx/api/helpers.py:store_file",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/helpers.py:require_sandbox",
+   "target": "function:sbx/api/db.py:get_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/helpers.py:require_running",
+   "target": "function:sbx/api/helpers.py:require_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/helpers.py:boot_sandbox",
+   "target": "function:sbx/node_agent.py:create_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/helpers.py:tear_down",
+   "target": "function:sbx/node_agent.py:destroy_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/helpers.py:tear_down",
+   "target": "function:sbx/api/db.py:set_state",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/helpers.py:run_command",
+   "target": "function:sbx/node_agent.py:exec",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/helpers.py:run_command",
+   "target": "function:sbx/api/helpers.py:guest_error_to_http",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/helpers.py:fetch_file",
+   "target": "function:sbx/node_agent.py:read_file",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/helpers.py:store_file",
+   "target": "function:sbx/node_agent.py:write_file",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/helpers.py:store_file",
+   "target": "function:sbx/api/helpers.py:guest_error_to_http",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/db.py:create_tables",
+   "target": "function:sbx/api/db.py:connect",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/db.py:insert_sandbox",
+   "target": "function:sbx/api/db.py:connect",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/db.py:set_state",
+   "target": "function:sbx/api/db.py:connect",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/db.py:get_sandbox",
+   "target": "function:sbx/api/db.py:to_sandbox_row",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/db.py:list_sandboxes",
+   "target": "function:sbx/api/db.py:to_sandbox_row",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "file:sbx/tests/test_db.py",
+   "type": "tested_by",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:sbx/api/db.py",
+   "target": "file:sbx/tests/test_api.py",
+   "type": "tested_by",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:sbx/api/main.py",
+   "target": "file:sbx/tests/test_api.py",
+   "type": "tested_by",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "file:sbx/node_agent.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "file:sbx/api/__init__.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "file:sbx/api/db.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "file:sbx/api/main.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "file:sbx/api/models.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "file:sbx/node_agent.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/tests/test_db.py",
+   "target": "file:sbx/api/__init__.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/tests/test_db.py",
+   "target": "file:sbx/api/db.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/tests/test_db.py",
+   "target": "file:sbx/api/models.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/tests/test_db.py",
+   "target": "file:sbx/node_agent.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "function:sbx/api/models.py:ip_for_slot",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "function:sbx/api/models.py:ip_for_slot",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:client",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_create_returns_a_running_sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_two_creates_get_different_ids",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_failed_boot_marks_the_row_destroyed",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_full_host_answers_503_and_marks_the_row_destroyed",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:boot_into_slot",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_list_shows_a_running_sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_list_keeps_destroyed_rows_oldest_first",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_get_returns_one_running_sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_get_destroyed_sandbox_is_still_found",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_delete_tears_down_a_running_sandbox_once",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_delete_skips_a_sandbox_that_is_already_destroyed",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_delete_tears_down_a_sandbox_that_is_still_starting",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:scripted_exec",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_exec_returns_a_finished_command",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_exec_returns_a_pid_for_a_background_command",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_exec_reports_a_command_timeout_in_the_body",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_exec_rejects_a_sandbox_that_is_not_running",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_exec_rejects_a_request_that_breaks_the_type",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_exec_passes_a_guest_client_error_through",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_exec_turns_a_dead_guest_into_bad_gateway",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_write_then_read_round_trips_the_file",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_write_replaces_the_old_text",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_read_missing_file_is_not_found",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_files_unknown_sandbox_is_not_found",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_files_reject_a_sandbox_that_is_not_running",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_files_require_a_path",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_write_passes_a_guest_client_error_through",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_read_turns_a_dead_guest_into_bad_gateway",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "function:sbx/tests/test_api.py:test_write_rejects_bytes_that_are_not_text",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_db.py",
+   "target": "function:sbx/tests/test_db.py:temp_db",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_db.py",
+   "target": "function:sbx/tests/test_db.py:test_list_returns_every_sandbox_oldest_first_with_slots",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:SandboxState",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:SandboxState",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:SandboxRow",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:SandboxRow",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:SandboxInfo",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:SandboxInfo",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:CreateSandboxResponse",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:CreateSandboxResponse",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:SandboxListResponse",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:SandboxListResponse",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:ExecuteRequest",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:ExecuteRequest",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:ExecuteResponse",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:ExecuteResponse",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:ExecuteBackgroundResponse",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "class:sbx/api/models.py:ExecuteBackgroundResponse",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/tests/test_api.py",
+   "target": "class:sbx/tests/test_api.py:MemoryFiles",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "class:sbx/api/models.py:SandboxInfo",
+   "target": "function:sbx/api/models.py:ip_for_slot",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "file:sbx/tests/test_db.py",
+   "type": "tested_by",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:sbx/api/models.py",
+   "target": "file:sbx/tests/test_api.py",
+   "type": "tested_by",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:sbx/client/client.py",
+   "target": "file:sbx/client/tools.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/client/client.py",
+   "target": "file:sbx/sdk/sandbox.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/client/client.py",
+   "target": "function:sbx/client/client.py:run_tool",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/client/client.py",
+   "target": "function:sbx/client/client.py:main",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/client/tools.py",
+   "target": "function:sbx/client/tools.py:build_tools",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/client/tools.py",
+   "target": "function:sbx/client/tools.py:build_tools",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/sdk/sandbox.py",
+   "target": "class:sbx/sdk/sandbox.py:SandboxError",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/sdk/sandbox.py",
+   "target": "function:sbx/sdk/sandbox.py:_call_api",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/sdk/sandbox.py",
+   "target": "class:sbx/sdk/sandbox.py:Sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/sdk/sandbox.py",
+   "target": "class:sbx/sdk/sandbox.py:Sandbox",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/sdk/sandbox.py",
+   "target": "class:sbx/sdk/sandbox.py:SandboxError",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/client/client.py:run_tool",
+   "target": "class:sbx/sdk/sandbox.py:Sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/client/client.py:main",
+   "target": "class:sbx/sdk/sandbox.py:Sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/client/client.py",
+   "target": "function:sbx/client/tools.py:build_tools",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/client/client.py:main",
+   "target": "function:sbx/client/client.py:run_tool",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "class:sbx/sdk/sandbox.py:Sandbox",
+   "target": "function:sbx/sdk/sandbox.py:_call_api",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/sdk/sandbox.py:_call_api",
+   "target": "class:sbx/sdk/sandbox.py:SandboxError",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/guest_agent/guest_agent.py",
+   "target": "file:sbx/guest_agent/helpers.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/guest_agent/helpers.py",
+   "target": "file:sbx/guest_agent/agent_types.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/guest_agent/agent_types.py",
+   "target": "class:sbx/guest_agent/agent_types.py:ExecResult",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/guest_agent/agent_types.py",
+   "target": "class:sbx/guest_agent/agent_types.py:ExecResult",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/guest_agent/agent_types.py",
+   "target": "class:sbx/guest_agent/agent_types.py:BackgroundResult",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/guest_agent/agent_types.py",
+   "target": "class:sbx/guest_agent/agent_types.py:BackgroundResult",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/guest_agent/guest_agent.py",
+   "target": "class:sbx/guest_agent/guest_agent.py:BadRequest",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/guest_agent/guest_agent.py",
+   "target": "class:sbx/guest_agent/guest_agent.py:BadRequest",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/guest_agent/guest_agent.py",
+   "target": "class:sbx/guest_agent/guest_agent.py:Handler",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/guest_agent/guest_agent.py",
+   "target": "class:sbx/guest_agent/guest_agent.py:Handler",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/guest_agent/helpers.py",
+   "target": "function:sbx/guest_agent/helpers.py:run_foreground",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/guest_agent/helpers.py",
+   "target": "function:sbx/guest_agent/helpers.py:run_foreground",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/guest_agent/helpers.py",
+   "target": "function:sbx/guest_agent/helpers.py:run_background",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/guest_agent/helpers.py",
+   "target": "function:sbx/guest_agent/helpers.py:run_background",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/guest_agent/helpers.py",
+   "target": "function:sbx/guest_agent/helpers.py:write_file_atomically",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/guest_agent/helpers.py",
+   "target": "function:sbx/guest_agent/helpers.py:write_file_atomically",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "class:sbx/guest_agent/guest_agent.py:Handler",
+   "target": "function:sbx/guest_agent/helpers.py:run_foreground",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "class:sbx/guest_agent/guest_agent.py:Handler",
+   "target": "function:sbx/guest_agent/helpers.py:run_background",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "class:sbx/guest_agent/guest_agent.py:Handler",
+   "target": "function:sbx/guest_agent/helpers.py:write_file_atomically",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/guest_agent/helpers.py:run_foreground",
+   "target": "class:sbx/guest_agent/agent_types.py:ExecResult",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "function:sbx/guest_agent/helpers.py:run_background",
+   "target": "class:sbx/guest_agent/agent_types.py:BackgroundResult",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "class:sbx/node_agent.py:NoFreeSlotsError",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "class:sbx/node_agent.py:NoFreeSlotsError",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "class:sbx/node_agent.py:Sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "class:sbx/node_agent.py:Sandbox",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:new_sandbox_id",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:new_sandbox_id",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:validate_sandbox_id",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:validate_sandbox_id",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:wait_until",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:wait_until",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:open_db",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:open_db",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:claim_free_slot",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:claim_free_slot",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:find_slot",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:find_slot",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:release_slot",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:release_slot",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:slot_holders",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:slot_holders",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:require_slot",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:require_slot",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:start_firecracker",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:start_firecracker",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:configure_and_boot_vm",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:configure_and_boot_vm",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:wait_for_guest_agent",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:wait_for_guest_agent",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:create_sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:create_sandbox",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:wait_for_exit",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:wait_for_exit",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:kill_firecracker",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:kill_firecracker",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:destroy_sandbox",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:destroy_sandbox",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:is_sandbox_running",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:is_sandbox_running",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:list_host_sandboxes",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:list_host_sandboxes",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:exec",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:exec",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:read_file",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:read_file",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:write_file",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:write_file",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/tests/test_node_agent.py",
+   "target": "function:sbx/tests/test_node_agent.py:test_two_sandboxes_run_commands_and_are_isolated",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_node_agent.py",
+   "target": "function:sbx/tests/test_node_agent.py:test_slot_is_reused_under_a_new_id",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_node_agent.py",
+   "target": "function:sbx/tests/test_node_agent.py:test_api_server_helpers",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_node_agent.py",
+   "target": "function:sbx/tests/test_node_agent.py:test_nothing_is_left_behind",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_node_agent_helpers.py",
+   "target": "function:sbx/tests/test_node_agent_helpers.py:test_concurrent_claims_never_share_a_slot",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_node_agent_helpers.py",
+   "target": "function:sbx/tests/test_node_agent_helpers.py:test_create_sandbox_cleans_up_when_a_step_fails",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_node_agent_helpers.py",
+   "target": "function:sbx/tests/test_node_agent_helpers.py:test_create_sandbox_uses_the_id_it_is_given",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_node_agent_helpers.py",
+   "target": "function:sbx/tests/test_node_agent_helpers.py:test_destroy_frees_slot_only_after_network_is_deleted",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/tests/test_node_agent_helpers.py",
+   "target": "function:sbx/tests/test_node_agent_helpers.py:test_destroy_keeps_the_slot_if_network_delete_fails",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "function:sbx/node_agent.py:create_sandbox",
+   "target": "function:sbx/node_agent.py:validate_sandbox_id",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:create_sandbox",
+   "target": "function:sbx/node_agent.py:new_sandbox_id",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:create_sandbox",
+   "target": "function:sbx/node_agent.py:claim_free_slot",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:create_sandbox",
+   "target": "function:sbx/node_agent.py:start_firecracker",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:create_sandbox",
+   "target": "function:sbx/node_agent.py:configure_and_boot_vm",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:create_sandbox",
+   "target": "function:sbx/node_agent.py:wait_for_guest_agent",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:create_sandbox",
+   "target": "function:sbx/node_agent.py:destroy_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:destroy_sandbox",
+   "target": "function:sbx/node_agent.py:validate_sandbox_id",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:destroy_sandbox",
+   "target": "function:sbx/node_agent.py:find_slot",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:destroy_sandbox",
+   "target": "function:sbx/node_agent.py:kill_firecracker",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:destroy_sandbox",
+   "target": "function:sbx/node_agent.py:release_slot",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:kill_firecracker",
+   "target": "function:sbx/node_agent.py:wait_for_exit",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:claim_free_slot",
+   "target": "function:sbx/node_agent.py:open_db",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:find_slot",
+   "target": "function:sbx/node_agent.py:open_db",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:release_slot",
+   "target": "function:sbx/node_agent.py:open_db",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:slot_holders",
+   "target": "function:sbx/node_agent.py:open_db",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:require_slot",
+   "target": "function:sbx/node_agent.py:validate_sandbox_id",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:require_slot",
+   "target": "function:sbx/node_agent.py:find_slot",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:is_sandbox_running",
+   "target": "function:sbx/node_agent.py:validate_sandbox_id",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:list_host_sandboxes",
+   "target": "function:sbx/node_agent.py:slot_holders",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:claim_free_slot",
+   "target": "class:sbx/node_agent.py:NoFreeSlotsError",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "function:sbx/node_agent.py:create_sandbox",
+   "target": "class:sbx/node_agent.py:Sandbox",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:sbx/tests/test_node_agent.py",
+   "target": "file:sbx/node_agent.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/tests/test_node_agent_helpers.py",
+   "target": "file:sbx/node_agent.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "file:sbx/tests/test_node_agent.py",
+   "type": "tested_by",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "file:sbx/tests/test_node_agent_helpers.py",
+   "type": "tested_by",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_two_sandboxes_run_commands_and_are_isolated",
+   "target": "function:sbx/node_agent.py:create_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_two_sandboxes_run_commands_and_are_isolated",
+   "target": "function:sbx/node_agent.py:exec",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_two_sandboxes_run_commands_and_are_isolated",
+   "target": "function:sbx/node_agent.py:write_file",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_two_sandboxes_run_commands_and_are_isolated",
+   "target": "function:sbx/node_agent.py:read_file",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_two_sandboxes_run_commands_and_are_isolated",
+   "target": "function:sbx/node_agent.py:destroy_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_slot_is_reused_under_a_new_id",
+   "target": "function:sbx/node_agent.py:create_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_slot_is_reused_under_a_new_id",
+   "target": "function:sbx/node_agent.py:destroy_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_slot_is_reused_under_a_new_id",
+   "target": "function:sbx/node_agent.py:exec",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_api_server_helpers",
+   "target": "function:sbx/node_agent.py:new_sandbox_id",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_api_server_helpers",
+   "target": "function:sbx/node_agent.py:create_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_api_server_helpers",
+   "target": "function:sbx/node_agent.py:is_sandbox_running",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_api_server_helpers",
+   "target": "function:sbx/node_agent.py:list_host_sandboxes",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_api_server_helpers",
+   "target": "function:sbx/node_agent.py:destroy_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent.py:test_nothing_is_left_behind",
+   "target": "function:sbx/node_agent.py:slot_holders",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent_helpers.py:test_concurrent_claims_never_share_a_slot",
+   "target": "function:sbx/node_agent.py:claim_free_slot",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent_helpers.py:test_create_sandbox_cleans_up_when_a_step_fails",
+   "target": "function:sbx/node_agent.py:create_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent_helpers.py:test_create_sandbox_uses_the_id_it_is_given",
+   "target": "function:sbx/node_agent.py:create_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent_helpers.py:test_destroy_frees_slot_only_after_network_is_deleted",
+   "target": "function:sbx/node_agent.py:claim_free_slot",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent_helpers.py:test_destroy_frees_slot_only_after_network_is_deleted",
+   "target": "function:sbx/node_agent.py:destroy_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent_helpers.py:test_destroy_frees_slot_only_after_network_is_deleted",
+   "target": "function:sbx/node_agent.py:find_slot",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent_helpers.py:test_destroy_keeps_the_slot_if_network_delete_fails",
+   "target": "function:sbx/node_agent.py:claim_free_slot",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent_helpers.py:test_destroy_keeps_the_slot_if_network_delete_fails",
+   "target": "function:sbx/node_agent.py:destroy_sandbox",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/tests/test_node_agent_helpers.py:test_destroy_keeps_the_slot_if_network_delete_fails",
+   "target": "function:sbx/node_agent.py:find_slot",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/scripts/install_guest_agent.sh",
+   "target": "function:sbx/scripts/install_guest_agent.sh:cmd_install",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/install_guest_agent.sh",
+   "target": "function:sbx/scripts/install_guest_agent.sh:cmd_verify",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/install_guest_agent.sh",
+   "target": "function:sbx/scripts/install_guest_agent.sh:cmd_test",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/netns.sh",
+   "target": "function:sbx/scripts/netns.sh:vars",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/netns.sh",
+   "target": "function:sbx/scripts/netns.sh:step3_veth",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/netns.sh",
+   "target": "function:sbx/scripts/netns.sh:step5_host",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/netns.sh",
+   "target": "function:sbx/scripts/netns.sh:cmd_create",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/netns.sh",
+   "target": "function:sbx/scripts/netns.sh:cmd_start",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/netns.sh",
+   "target": "function:sbx/scripts/netns.sh:cmd_stop",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/netns.sh",
+   "target": "function:sbx/scripts/netns.sh:cmd_verify",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/netns.sh",
+   "target": "function:sbx/scripts/netns.sh:cmd_verify_deleted",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/netns.sh",
+   "target": "function:sbx/scripts/netns.sh:main",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/setup_host.sh",
+   "target": "function:sbx/scripts/setup_host.sh:cleanup",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/scripts/setup_host.sh",
+   "target": "file:sbx/scripts/install_guest_agent.sh",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:sbx/scripts/install_guest_agent.sh",
+   "target": "file:sbx/guest_agent/guest_agent.py",
+   "type": "deploys",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:sbx/scripts/netns.sh",
+   "target": "file:sbx/scripts/install_guest_agent.sh",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:sbx/scripts/netns_create.sh",
+   "target": "file:sbx/scripts/netns.sh",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:sbx/scripts/netns_delete.sh",
+   "target": "file:sbx/scripts/netns_create.sh",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "file:sbx/scripts/netns_create.sh",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "file:sbx/scripts/netns_delete.sh",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "table:sbx/db/schema.sql",
+   "target": "table:sbx/db/schema.sql:slots",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "table:sbx/db/seed.sql",
+   "target": "table:sbx/db/schema.sql:slots",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "table:sbx/db/schema.sql",
+   "target": "table:sbx/db/schema.sql:sandboxes",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "table:sbx/db/seed.sql",
+   "target": "table:sbx/db/schema.sql:sandboxes",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "table:sbx/db/seed.sql",
+   "target": "table:sbx/db/schema.sql",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "table:sbx/db/schema.sql",
+   "target": "file:sbx/api/db.py",
+   "type": "defines_schema",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "table:sbx/db/schema.sql",
+   "target": "file:sbx/api/models.py",
+   "type": "defines_schema",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "table:sbx/db/schema.sql",
+   "target": "file:sbx/node_agent.py",
+   "type": "defines_schema",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "config:.env.example",
+   "target": "file:sbx/client/client.py",
+   "type": "configures",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "config:.env.example",
+   "target": "file:sbx/sdk/sandbox.py",
+   "type": "configures",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "config:sbx/pyproject.toml",
+   "target": "file:sbx/api/main.py",
+   "type": "configures",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "config:sbx/pyproject.toml",
+   "target": "file:sbx/node_agent.py",
+   "type": "configures",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "config:sbx/pyproject.toml",
+   "target": "file:sbx/client/client.py",
+   "type": "configures",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "config:sbx/pyproject.toml",
+   "target": "file:sbx/sdk/sandbox.py",
+   "type": "configures",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "document:README.md",
+   "target": "file:sbx/node_agent.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:README.md",
+   "target": "file:sbx/api/main.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:README.md",
+   "target": "file:sbx/api/db.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:README.md",
+   "target": "file:sbx/client/client.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:README.md",
+   "target": "file:sbx/client/tools.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:README.md",
+   "target": "file:sbx/sdk/sandbox.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:README.md",
+   "target": "file:sbx/scripts/setup_host.sh",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:README.md",
+   "target": "file:sbx/scripts/netns_create.sh",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:README.md",
+   "target": "file:sbx/scripts/netns_delete.sh",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:README.md",
+   "target": "table:sbx/db/schema.sql",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:sbx/tests/acceptance_agent.md",
+   "target": "file:sbx/api/main.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:sbx/tests/acceptance_agent.md",
+   "target": "file:sbx/client/client.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:sbx/tests/acceptance_agent.md",
+   "target": "file:sbx/scripts/setup_host.sh",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:.gitignore",
+   "target": "table:sbx/db/seed.sql",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:guest_ip_for",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:guest_ip_for",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:db_path",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:sbx/node_agent.py",
+   "target": "function:sbx/node_agent.py:db_path",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/db.py:connect",
+   "target": "function:sbx/node_agent.py:db_path",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/api/models.py:ip_for_slot",
+   "target": "function:sbx/node_agent.py:guest_ip_for",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:sbx/node_agent.py:open_db",
+   "target": "function:sbx/node_agent.py:db_path",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  }
+ ],
+ "layers": [
+  {
+   "id": "layer:api",
+   "name": "API Server",
+   "description": "FastAPI control plane exposing sandbox create/list/get/delete endpoints, with Pydantic contracts, request helpers, and the SQLite state database wrapper.",
+   "nodeIds": [
+    "file:sbx/api/__init__.py",
+    "file:sbx/api/db.py",
+    "file:sbx/api/helpers.py",
+    "file:sbx/api/main.py",
+    "file:sbx/api/models.py"
+   ]
+  },
+  {
+   "id": "layer:host-runtime",
+   "name": "Host Runtime",
+   "description": "Host-side node agent and shell scripts that bootstrap the KVM host, bake the guest agent into the rootfs, and create, network, boot, and destroy Firecracker microVMs.",
+   "nodeIds": [
+    "file:sbx/node_agent.py",
+    "file:sbx/scripts/install_guest_agent.sh",
+    "file:sbx/scripts/netns.sh",
+    "file:sbx/scripts/netns_create.sh",
+    "file:sbx/scripts/netns_delete.sh",
+    "file:sbx/scripts/setup_host.sh"
+   ]
+  },
+  {
+   "id": "layer:guest-agent",
+   "name": "Guest Agent",
+   "description": "In-VM HTTP server running inside each microVM that executes shell commands and reads/writes files on behalf of the host.",
+   "nodeIds": [
+    "file:sbx/guest_agent/agent_types.py",
+    "file:sbx/guest_agent/guest_agent.py",
+    "file:sbx/guest_agent/helpers.py"
+   ]
+  },
+  {
+   "id": "layer:data",
+   "name": "Data Schema",
+   "description": "SQLite schema and seed data defining the sandboxes table and the network slot allocation table used by the API and node agent.",
+   "nodeIds": [
+    "table:sbx/db/schema.sql",
+    "table:sbx/db/schema.sql:slots",
+    "table:sbx/db/schema.sql:sandboxes",
+    "table:sbx/db/seed.sql"
+   ]
+  },
+  {
+   "id": "layer:sdk-client",
+   "name": "SDK and Example Client",
+   "description": "Python SDK wrapping the sandbox HTTP API plus an example OpenAI tool-calling coding agent that drives a sandbox through it.",
+   "nodeIds": [
+    "file:sbx/sdk/sandbox.py",
+    "file:sbx/client/client.py",
+    "file:sbx/client/tools.py"
+   ]
+  },
+  {
+   "id": "layer:test",
+   "name": "Tests",
+   "description": "Pytest suites for the API, state database, and node agent (unit and KVM-only integration), plus the manual Milestone 1 acceptance procedure.",
+   "nodeIds": [
+    "file:sbx/tests/test_api.py",
+    "file:sbx/tests/test_db.py",
+    "file:sbx/tests/test_node_agent.py",
+    "file:sbx/tests/test_node_agent_helpers.py",
+    "document:sbx/tests/acceptance_agent.md"
+   ]
+  },
+  {
+   "id": "layer:project-config",
+   "name": "Project Config and Docs",
+   "description": "Repository-level project metadata, environment template, git ignore rules and commit hook, and the main README covering host setup and usage.",
+   "nodeIds": [
+    "config:sbx/pyproject.toml",
+    "config:.env.example",
+    "file:.gitignore",
+    "file:.githooks/prepare-commit-msg",
+    "document:README.md"
+   ]
+  }
+ ],
+ "tour": [
+  {
+   "order": 1,
+   "title": "Project Overview",
+   "description": "Start with the README, which describes persistent sandboxes: Firecracker microVMs on a KVM Linux host, managed by an API server and used through a Python SDK and example agents. Its layered diagram (client, SDK, FastAPI server, node agent, Firecracker microVM, guest agent) is the roadmap for this tour. It also records the design notes and tradeoffs for each milestone step, from the node agent (1F) through the API server (1G) and the SDK and agents (1H/I).",
+   "nodeIds": [
+    "document:README.md"
+   ]
+  },
+  {
+   "order": 2,
+   "title": "Project Setup and Dependencies",
+   "description": "pyproject.toml declares the Python 3.11+ project and its runtime stack: FastAPI and uvicorn for the server, httpx for the SDK, pydantic for contracts, and openai plus python-dotenv for the example agent. The .env.example template shows the two settings a client needs, OPENAI_API_KEY and SANDBOX_API, the SSH-tunneled URL where the SDK reaches the API on the GCP host.",
+   "nodeIds": [
+    "config:sbx/pyproject.toml",
+    "config:.env.example"
+   ],
+   "languageLesson": "pyproject.toml is the standard Python project manifest (PEP 621). Dependency groups, like the pytest dev group here, keep test-only tools out of the runtime install."
+  },
+  {
+   "order": 3,
+   "title": "Bootstrapping the KVM Host",
+   "description": "Before anything can run, setup_host.sh prepares the Linux host once: it installs packages, checks KVM and cgroups v2, installs a pinned Firecracker, downloads a kernel, and builds the Ubuntu 24.04 base rootfs. As part of that, install_guest_agent.sh bakes the Python guest agent into the rootfs as a systemd service, so every microVM boots with its in-VM server already running. Both scripts are idempotent, so re-running them is safe.",
+   "nodeIds": [
+    "file:sbx/scripts/setup_host.sh",
+    "file:sbx/scripts/install_guest_agent.sh"
+   ],
+   "languageLesson": "Idempotent shell scripts check current state before acting (for example, skip a download if the file exists), so they can be run repeatedly without breaking a configured host."
+  },
+  {
+   "order": 4,
+   "title": "The Guest Agent Inside the VM",
+   "description": "This is the bottom of the stack from the README diagram: a small standalone HTTP server inside each microVM exposing /health, /exec and /files. Its helpers run shell commands with timeouts and process-group kills, spawn background jobs that log to /tmp, and write files atomically. agent_types.py pins down the response shapes the host can expect from /exec.",
+   "nodeIds": [
+    "file:sbx/guest_agent/guest_agent.py",
+    "file:sbx/guest_agent/helpers.py",
+    "file:sbx/guest_agent/agent_types.py"
+   ],
+   "languageLesson": "Python TypedDict describes the expected keys and value types of a plain dict. It gives type checkers a contract for JSON-like responses without adding runtime classes."
+  },
+  {
+   "order": 5,
+   "title": "Data Schema: Slots and Sandboxes",
+   "description": "schema.sql defines the shared SQLite state that both the host runtime and the API rely on. The slots table maps network slot numbers 1-250 to sandboxes and is owned by the node agent, while the sandboxes table tracks each API-created sandbox's lifecycle state (starting, running, destroyed) and timestamps. seed.sql adds sample rows for a local test database.",
+   "nodeIds": [
+    "table:sbx/db/schema.sql",
+    "table:sbx/db/schema.sql:slots",
+    "table:sbx/db/schema.sql:sandboxes",
+    "table:sbx/db/seed.sql"
+   ],
+   "languageLesson": "The schema enables WAL (write-ahead logging) mode, which lets readers and a writer use a SQLite file concurrently. CHECK constraints, like the one restricting sandbox state, enforce valid values at the database level."
+  },
+  {
+   "order": 6,
+   "title": "The Node Agent",
+   "description": "node_agent.py is the most depended-on file in the project and the host-side runtime for sandboxes. It creates, boots, tracks and destroys Firecracker microVMs: it copies the disk, sets up a network namespace and cgroup, configures the VM through the Firecracker socket API, and claims a network slot from the slots table from Step 5. It also proxies requests to the guest agent from Step 4, so the rest of the system never talks to a VM directly.",
+   "nodeIds": [
+    "file:sbx/node_agent.py"
+   ]
+  },
+  {
+   "order": 7,
+   "title": "Per-Sandbox Networking",
+   "description": "The node agent delegates networking to two scripts. netns_create.sh gives slot N its own namespace with a tap0 device, a veth pair to the host, and NAT rules that expose the VM at a unique 10.201.0.N address, so every VM can use the same internal IP without colliding. netns_delete.sh tears this down idempotently and fails loudly if anything is left over, so a dirty slot is never reused.",
+   "nodeIds": [
+    "file:sbx/scripts/netns_create.sh",
+    "file:sbx/scripts/netns_delete.sh",
+    "file:sbx/scripts/netns.sh"
+   ]
+  },
+  {
+   "order": 8,
+   "title": "API Contracts and State Layer",
+   "description": "Moving up to the API server, models.py defines the Pydantic contracts: sandbox states, database rows, client-facing sandbox info, and exec request/response shapes with timeout limits. db.py is the server's SQLite layer. It opens WAL connections, creates tables from the schema in Step 5, and records and lists sandbox rows joined to their network slots. These two files are imported by most of the server and tests.",
+   "nodeIds": [
+    "file:sbx/api/models.py",
+    "file:sbx/api/db.py"
+   ],
+   "languageLesson": "Pydantic models validate data at runtime from type annotations. FastAPI uses them to parse request bodies and serialize responses, so the models double as the API's documented schema."
+  },
+  {
+   "order": 9,
+   "title": "FastAPI Server Entry Point",
+   "description": "main.py is the server entry point, exposing REST endpoints to create, list, get and delete sandboxes and to exec commands and read or write files inside a running one. The endpoints stay thin because helpers.py does the work: 404/409 guards, booting and tearing down sandboxes through the node agent from Step 6, and translating guest-agent errors into HTTP responses. This is the control plane every client talks to.",
+   "nodeIds": [
+    "file:sbx/api/main.py",
+    "file:sbx/api/helpers.py",
+    "file:sbx/api/__init__.py"
+   ],
+   "languageLesson": "FastAPI route functions are plain Python functions decorated with @app.get/@app.post. Parameters with type hints are parsed automatically from the path, query or body."
+  },
+  {
+   "order": 10,
+   "title": "The Python SDK",
+   "description": "sandbox.py wraps the HTTP API from Step 9 in a Sandbox class that uses httpx to create sandboxes, run commands, read and write files, and destroy them. API error statuses are raised as SandboxError, so callers handle failures with ordinary Python exceptions instead of checking status codes.",
+   "nodeIds": [
+    "file:sbx/sdk/sandbox.py"
+   ]
+  },
+  {
+   "order": 11,
+   "title": "Example Coding Agent",
+   "description": "The client is the top of the stack: an interactive agent that boots one sandbox via the SDK and keeps it across tasks while running an OpenAI tool-calling chat loop. tools.py defines the run_command, read_file and write_file tool schemas the model sees, and client.py dispatches each tool call into the sandbox, then destroys it at the end. This shows why the sandboxes are persistent: a long-running agent keeps its working environment between turns.",
+   "nodeIds": [
+    "file:sbx/client/client.py",
+    "file:sbx/client/tools.py"
+   ],
+   "languageLesson": "OpenAI function calling describes each tool with a JSON Schema. The model returns a tool name and JSON arguments, and the application runs the tool and sends the result back as a new message."
+  },
+  {
+   "order": 12,
+   "title": "Testing and Acceptance",
+   "description": "The tests mirror the layers you have just walked through. test_api.py drives the endpoints with a TestClient and a monkeypatched node agent, test_db.py checks the state layer against the node agent's slots table, test_node_agent_helpers.py covers slot claiming and cleanup without KVM, and test_node_agent.py boots real VMs on a KVM host. acceptance_agent.md is the manual end-to-end check: start the API, run the client agent on real tasks, and confirm cleanup and boot time.",
+   "nodeIds": [
+    "file:sbx/tests/test_api.py",
+    "file:sbx/tests/test_db.py",
+    "file:sbx/tests/test_node_agent_helpers.py",
+    "file:sbx/tests/test_node_agent.py",
+    "document:sbx/tests/acceptance_agent.md"
+   ],
+   "languageLesson": "pytest's monkeypatch fixture swaps functions or attributes for the duration of a test, which is how the API tests replace the node agent and run without KVM."
+  }
+ ]
+}

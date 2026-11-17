@@ -22,7 +22,30 @@ class SandboxState(StrEnum):
 
     STARTING = "starting"
     RUNNING = "running"
+    PAUSING = "pausing"
+    PAUSED = "paused"
+    RESUMING = "resuming"
     DESTROYED = "destroyed"
+
+
+class TurnState(StrEnum):
+    """Whether the agent is running a turn; must match the CHECK in db/schema.sql."""
+
+    IDLE = "idle"
+    WORKING = "working"
+
+
+class EventType(StrEnum):
+    """The kinds of event in a sandbox's conversation; listed in db/schema.sql."""
+
+    USER_MESSAGE = "user_message"
+    AGENT_OUTPUT = "agent_output"
+    QUESTION = "question"
+    TURN_STARTED = "turn_started"
+    TURN_FINISHED = "turn_finished"
+    TURN_FAILED = "turn_failed"
+    PAUSED = "paused"
+    RESUMED = "resumed"
 
 
 # ---------------------------------------------------------------------------
@@ -36,6 +59,9 @@ class SandboxRow(BaseModel):
     state: SandboxState
     created_at: int                 # unix seconds
     updated_at: int                 # unix seconds
+    turn_state: TurnState = TurnState.IDLE
+    snapshot_dir: str | None = None # host folder holding the snapshot; None unless paused
+    paused_at: int | None = None    # unix seconds; None unless paused
     n: int | None = None            # network slot; None when it holds none
 
 
@@ -51,6 +77,8 @@ class SandboxInfo(BaseModel):
     ip: str | None                  # None when the sandbox holds no slot
     created_at: int                 # unix seconds
     updated_at: int                 # unix seconds
+    turn_state: TurnState           # working while the agent runs a turn
+    paused_at: int | None = None    # unix seconds; None unless paused
 
     @classmethod
     def from_row(cls, row: SandboxRow) -> SandboxInfo:
@@ -61,6 +89,8 @@ class SandboxInfo(BaseModel):
             ip=ip_for_slot(row.n),
             created_at=row.created_at,
             updated_at=row.updated_at,
+            turn_state=row.turn_state,
+            paused_at=row.paused_at,
         )
 
 
@@ -123,3 +153,37 @@ class ExecuteBackgroundResponse(BaseModel):
     """The process number of a command left running; its output is in /tmp/bg-<pid>.log."""
 
     pid: int
+
+
+# ---------------------------------------------------------------------------
+# Messages and events
+# ---------------------------------------------------------------------------
+
+class MessageRequest(BaseModel):
+    """What the user sends to start a turn."""
+
+    text: str = Field(
+        min_length=1,
+        description="The user's message, handed to the agent on stdin.",
+    )
+
+
+class MessageResponse(BaseModel):
+    """Where the user's message landed in the event log."""
+
+    seq: int
+
+
+class Event(BaseModel):
+    """One entry in a sandbox's conversation."""
+
+    seq: int                        # 1, 2, 3, ... per sandbox
+    type: EventType
+    data: dict                      # depends on type, e.g. {"text": "..."} for user_message
+    at: int                         # unix seconds
+
+
+class EventListResponse(BaseModel):
+    """The events a client hasn't seen yet, oldest first."""
+
+    events: list[Event]
