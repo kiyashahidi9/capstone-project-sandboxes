@@ -13,13 +13,15 @@ from api.helpers import (
     HTTP_CREATED,
     boot_sandbox,
     build_create_response,
-    is_destroyed,
+    destroy,
+    ensure_running,
     fetch_file,
-    require_running,
+    pause,
+    recover_interrupted_changes,
     require_sandbox,
+    resume,
     run_command,
     store_file,
-    tear_down,
     text_from_body,
     to_background_response,
     to_execute_response,
@@ -41,8 +43,9 @@ from api.models import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Gets the database ready before the server starts taking requests."""
-    db.create_tables();
+    """Gets the database ready, and settles any pause or resume a crash cut off, before taking requests."""
+    db.create_tables()
+    recover_interrupted_changes()
     yield
 
 
@@ -78,11 +81,21 @@ def get_sandbox(sandbox_id: str) -> SandboxInfo:
 
 @app.delete("/sandboxes/{sandbox_id}")
 def delete_sandbox(sandbox_id: str) -> dict[str, bool]:
-    """Shuts a sandbox down for good; asking twice is harmless."""
-    row = require_sandbox(sandbox_id)
-    if not is_destroyed(row):
-        tear_down(sandbox_id)
+    """Shuts a sandbox down for good, after any pause under way; asking twice is harmless."""
+    destroy(sandbox_id)
     return {"ok": True}
+
+
+@app.post("/sandboxes/{sandbox_id}/pause", response_model=SandboxInfo)
+def pause_sandbox(sandbox_id: str) -> SandboxInfo:
+    """Saves a running sandbox to disk and frees its memory, cutting off the agent's turn."""
+    return SandboxInfo.from_row(pause(sandbox_id))
+
+
+@app.post("/sandboxes/{sandbox_id}/resume", response_model=SandboxInfo)
+def resume_sandbox(sandbox_id: str) -> SandboxInfo:
+    """Brings a paused sandbox back exactly where it left off."""
+    return SandboxInfo.from_row(resume(sandbox_id))
 
 
 # ---------------------------------------------------------------------------
@@ -94,8 +107,8 @@ def delete_sandbox(sandbox_id: str) -> dict[str, bool]:
     response_model=ExecuteResponse | ExecuteBackgroundResponse,
 )
 def exec_command(sandbox_id: str, request: ExecuteRequest) -> ExecuteResponse | ExecuteBackgroundResponse:
-    """Runs a shell command in the sandbox for the client."""
-    require_running(sandbox_id)
+    """Runs a shell command in the sandbox for the client, resuming it first if it's paused."""
+    ensure_running(sandbox_id)
     result = run_command(sandbox_id, request)
     if request.background:
         return to_background_response(result)
@@ -104,15 +117,15 @@ def exec_command(sandbox_id: str, request: ExecuteRequest) -> ExecuteResponse | 
 
 @app.get("/sandboxes/{sandbox_id}/files", response_class=PlainTextResponse)
 def read_file(sandbox_id: str, path: str) -> str:
-    """Sends the client a file's contents from inside the sandbox as plain text."""
-    require_running(sandbox_id)
+    """Sends the client a file's contents from inside the sandbox, resuming it first if it's paused."""
+    ensure_running(sandbox_id)
     return fetch_file(sandbox_id, path)
 
 
 @app.put("/sandboxes/{sandbox_id}/files")
 async def write_file(sandbox_id: str, path: str, request: Request) -> dict[str, bool]:
-    """Saves the uploaded text to a file inside the sandbox."""
-    require_running(sandbox_id)
+    """Saves the uploaded text to a file inside the sandbox, resuming it first if it's paused."""
+    await run_in_threadpool(ensure_running, sandbox_id)   # may wait on the lock, so off the event loop
     content = text_from_body(await request.body())
     await run_in_threadpool(store_file, sandbox_id, path, content)
     return {"ok": True}

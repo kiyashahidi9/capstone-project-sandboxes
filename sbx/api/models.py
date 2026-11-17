@@ -22,6 +22,9 @@ class SandboxState(StrEnum):
 
     STARTING = "starting"
     RUNNING = "running"
+    PAUSING = "pausing"
+    PAUSED = "paused"
+    RESUMING = "resuming"
     DESTROYED = "destroyed"
 
 
@@ -36,6 +39,8 @@ class SandboxRow(BaseModel):
     state: SandboxState
     created_at: int                 # unix seconds
     updated_at: int                 # unix seconds
+    snapshot_dir: str | None = None # host folder holding the snapshot; None unless paused
+    paused_at: int | None = None    # unix seconds; None unless paused
     n: int | None = None            # network slot; None when it holds none
 
 
@@ -51,6 +56,7 @@ class SandboxInfo(BaseModel):
     ip: str | None                  # None when the sandbox holds no slot
     created_at: int                 # unix seconds
     updated_at: int                 # unix seconds
+    paused_at: int | None = None    # unix seconds; None unless paused
 
     @classmethod
     def from_row(cls, row: SandboxRow) -> SandboxInfo:
@@ -61,6 +67,7 @@ class SandboxInfo(BaseModel):
             ip=ip_for_slot(row.n),
             created_at=row.created_at,
             updated_at=row.updated_at,
+            paused_at=row.paused_at,
         )
 
 

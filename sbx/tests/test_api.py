@@ -141,6 +141,7 @@ def test_list_shows_a_running_sandbox(client, monkeypatch):
                 "ip": "10.201.0.4",
                 "created_at": created["created_at"],
                 "updated_at": created["updated_at"],
+                "paused_at": None,
             }
         ]
     }
@@ -192,6 +193,7 @@ def test_get_returns_one_running_sandbox(client, monkeypatch):
         "ip": "10.201.0.4",
         "created_at": created["created_at"],
         "updated_at": created["updated_at"],
+        "paused_at": None,
     }
 
 

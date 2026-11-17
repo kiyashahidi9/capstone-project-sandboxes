@@ -1,18 +1,42 @@
 import os
 import subprocess
+import time
 
 import pytest
 
 import node_agent
 from node_agent import (
-    create_sandbox, destroy_sandbox, exec, is_sandbox_running, list_host_sandboxes,
-    new_sandbox_id, read_file, write_file,
+    create_sandbox, destroy_sandbox, exec, guest_agent_is_healthy, is_sandbox_running,
+    list_host_sandboxes, new_sandbox_id, pause_sandbox, read_file, resume_sandbox, write_file,
 )
 
 pytestmark = pytest.mark.skipif(
     os.geteuid() != 0 or not os.path.exists("/dev/kvm"),
     reason="needs root and /dev/kvm (run on the sandbox host with sudo)",
 )
+
+# Writes to a temp file then renames it, so a read never sees a half-written number.
+COUNTER_COMMAND = (
+    "i=0; while true; do echo $i > /root/count.tmp; mv /root/count.tmp /root/count; "
+    "i=$((i+1)); sleep 1; done"
+)
+COUNTER_WAIT = 3                                       # seconds, long enough for the count to rise
+
+
+def start_counter(sandbox_id):
+    """Start a loop in the sandbox that writes a rising number to /root/count every second."""
+    exec(sandbox_id, COUNTER_COMMAND, background=True)
+
+
+def read_counter(sandbox_id):
+    """Return the number the counter loop wrote last."""
+    return int(read_file(sandbox_id, "/root/count").strip())
+
+
+def firecracker_pids(sandbox_id):
+    """Return the PIDs of any Firecracker still serving this sandbox (empty if none)."""
+    found = subprocess.run(["pgrep", "-f", f"{sandbox_id}/fc.sock"], capture_output=True, text=True)
+    return found.stdout.strip()
 
 
 def test_two_sandboxes_run_commands_and_are_isolated():
@@ -64,6 +88,43 @@ def test_api_server_helpers():
         destroy_sandbox(sandbox_id)
     assert not is_sandbox_running(sandbox_id)
     assert sandbox_id not in list_host_sandboxes()
+
+
+def test_pause_and_resume_keep_a_running_process():
+    """A background process keeps counting across a pause and resume (4b)."""
+    sbx = create_sandbox()
+    try:
+        start_counter(sbx.id)
+        time.sleep(COUNTER_WAIT)
+        count_before_pause = read_counter(sbx.id)
+
+        pause_timings = pause_sandbox(sbx.id)
+        assert firecracker_pids(sbx.id) == ""
+        assert os.path.exists(node_agent.vmstate_path(sbx.id))
+        assert os.path.exists(node_agent.mem_path(sbx.id))
+
+        resumed = resume_sandbox(sbx.id)
+        print(f"\npause: {pause_timings}\nresume: {resumed}")
+        assert resumed["pid"] != sbx.pid
+        assert guest_agent_is_healthy(sbx.id)
+
+        time.sleep(COUNTER_WAIT)
+        assert read_counter(sbx.id) > count_before_pause
+    finally:
+        destroy_sandbox(sbx.id)
+
+
+def test_destroy_a_paused_sandbox():
+    """Destroying a paused sandbox leaves no process, cgroup, slot or folder (4b step 6)."""
+    sbx = create_sandbox()
+    try:
+        pause_sandbox(sbx.id)
+    finally:
+        destroy_sandbox(sbx.id)
+    assert firecracker_pids(sbx.id) == ""
+    assert not os.path.exists(node_agent.cgroup_dir(sbx.id))
+    assert node_agent.find_slot(sbx.id) is None
+    assert not os.path.exists(node_agent.sandbox_dir(sbx.id))
 
 
 def test_nothing_is_left_behind():

@@ -11,6 +11,10 @@ CREATE_TIMEOUT = 120
 EXEC_TIMEOUT = 660
 DEFAULT_TIMEOUT = 30
 
+# A pause writes the VM's whole memory to disk (~15 s, more if the guest is slow to sync).
+# File calls and destroy may wait for a pause under way, then resume, so they get the same allowance.
+PAUSE_TIMEOUT = 120
+
 
 class SandboxError(Exception):
     """Raised when the sandbox API responds with an error status.
@@ -67,11 +71,15 @@ class Sandbox:
 
     Start one with `Sandbox.create()` and call `destroy()` when you are done.
 
+    A paused sandbox wakes up by itself: `exec()`, `read_file()` and
+    `write_file()` resume it first, so those calls are just a little slower.
+
     Every method raises `SandboxError` when the API responds with an error:
 
     - 400: Bad request, e.g. a relative path or a `cwd` that does not exist.
     - 404: No sandbox exists with this id.
-    - 409: The sandbox has already been destroyed.
+    - 409: The sandbox is in the wrong state for this call, e.g. it has been
+      destroyed, or you paused a sandbox that is already paused.
     - 502: The API could not reach the guest agent inside the VM.
 
     If the API itself cannot be reached, httpx exceptions such as
@@ -178,7 +186,7 @@ class Sandbox:
 
         url = f"{self._url}/files"
         params = {"path": path}
-        res = _call_api("GET", url, params=params)
+        res = _call_api("GET", url, timeout=PAUSE_TIMEOUT, params=params)
 
         return res.text
 
@@ -201,16 +209,40 @@ class Sandbox:
         params = {"path": path}
         data = content.encode()
 
-        _call_api("PUT", url, params=params, content=data)
+        _call_api("PUT", url, timeout=PAUSE_TIMEOUT, params=params, content=data)
+
+    def pause(self) -> None:
+        """Save the sandbox to disk and free its memory.
+
+        Everything is kept: files, running processes and the agent's
+        conversation. An agent turn that is running is cut off. Blocks until
+        the pause is done, usually about 15 seconds.
+
+        Raises:
+            SandboxError: 409 if the sandbox is not running (for example,
+                already paused).
+        """
+
+        _call_api("POST", f"{self._url}/pause", timeout=PAUSE_TIMEOUT)
+
+    def resume(self) -> None:
+        """Bring a paused sandbox back exactly where it left off.
+
+        Usually not needed: `exec()`, `read_file()` and `write_file()` resume a
+        paused sandbox by themselves. Takes about 1-2 seconds.
+
+        Raises:
+            SandboxError: 409 if the sandbox is not paused.
+        """
+
+        _call_api("POST", f"{self._url}/resume", timeout=PAUSE_TIMEOUT)
 
     def destroy(self) -> None:
         """Stop the sandbox and delete everything in it.
 
         All of its files and running processes, including background ones, are
-        removed. The sandbox cannot be used afterwards.
-
-        Raises:
-            SandboxError: 409 if the sandbox has already been destroyed.
+        removed. The sandbox cannot be used afterwards. If a pause is under
+        way, this waits for it to finish first. Calling it twice is harmless.
         """
 
-        _call_api("DELETE", self._url)
+        _call_api("DELETE", self._url, timeout=PAUSE_TIMEOUT)
