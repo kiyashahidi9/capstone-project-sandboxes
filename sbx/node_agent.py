@@ -176,6 +176,37 @@ def cgroup_dir(sandbox_id: str) -> str:
     return f"{CGROUP_ROOT}/{sandbox_id}"
 
 
+def read_cpu_usage_usec(sandbox_id: str) -> int | None:
+    """Read the sandbox cgroup's total CPU time in microseconds, or None if cpu.stat is not there."""
+    validate_sandbox_id(sandbox_id)
+    path = f"{cgroup_dir(sandbox_id)}/cpu.stat"
+    try:
+        with open(path, encoding="utf-8") as stat:
+            text = stat.read()
+    except OSError:
+        return None
+    for line in text.splitlines():
+        key, _, value = line.partition(" ")
+        if key != "usage_usec":
+            continue
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def cpu_percent(earlier_usec: int | None, later_usec: int | None, elapsed_seconds: float) -> float | None:
+    """
+    Percent of one core between two usage_usec readings.
+    None for a first reading, a zero gap, or a counter that went backwards.
+    """
+    if earlier_usec is None or later_usec is None or elapsed_seconds <= 0 or later_usec < earlier_usec:
+        return None
+    delta_usec: int = later_usec - earlier_usec
+    return (delta_usec / 1_000_000) / elapsed_seconds * 100
+
+
 # ---------------------------------------------------------------------------
 # Generic helpers
 # ---------------------------------------------------------------------------
