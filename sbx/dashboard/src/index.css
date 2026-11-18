@@ -1,0 +1,104 @@
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #f6f7f9;
+  color: #1f2328;
+}
+
+main {
+  max-width: 960px;
+  margin: 40px auto;
+  padding: 0 16px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  border: 1px solid #d0d7de;
+}
+
+th, td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid #d0d7de;
+}
+
+th {
+  background: #f0f2f5;
+  font-size: 13px;
+}
+
+.id {
+  font-family: monospace;
+  font-size: 13px;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+.badge.running { background: #dafbe1; color: #116329; }
+.badge.starting, .badge.pausing, .badge.resuming { background: #fff8c5; color: #7d4e00; }
+.badge.paused  { background: #fbefff; color: #6639ba; }
+.badge.working  { background: #ddf4ff; color: #0550ae; }
+.badge.idle     { background: #eaeef2; color: #57606a; }
+
+.actions {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+button {
+  padding: 5px 12px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+}
+button:hover { background: #f3f4f6; }
+
+button.danger {
+  color: #cf222e;
+  border-color: #cf222e;
+}
+button.danger:hover { background: #ffebe9; }
+
+.muted { color: #57606a; font-size: 12px; }
+
+.error {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid #cf222e;
+  border-radius: 6px;
+  background: #ffebe9;
+  color: #82071e;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.modal {
+  max-width: 420px;
+  padding: 20px;
+  border-radius: 8px;
+  background: white;
+}
+
+.modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
