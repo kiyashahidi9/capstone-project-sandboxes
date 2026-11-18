@@ -3,8 +3,6 @@ One lock per sandbox, so a turn and a pause or resume never run at the same time
 used by runner/runner.py (2e) and by pause and resume (Track C, 4c)
 """
 
-## IMPORTS ##
-
 import threading
 
 

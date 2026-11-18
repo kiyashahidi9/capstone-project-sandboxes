@@ -1,0 +1,91 @@
+{
+  "session_id": "session_001",
+  "agent_id": "agent1",
+  "sandbox_id": "sbx1",
+  "events": [
+    {
+      "event_id": "evt_001",
+      "timestamp": "2026-11-16T15:00:00Z",
+      "event_type": "USER_INSTRUCTION",
+      "data": { "message": "Add 4 + 6 to count and print it" }
+    },
+    {
+      "event_id": "evt_002",
+      "timestamp": "2026-11-16T15:00:01Z",
+      "event_type": "AGENT_STARTED"
+    },
+    {
+      "event_id": "evt_003",
+      "timestamp": "2026-11-16T15:00:02Z",
+      "event_type": "LLM_REQUEST",
+      "data": {
+        "model": "mock-model",
+        "messages": [{ "role": "user", "content": "Add 4 + 6 to count and print it" }]
+      }
+    },
+    {
+      "event_id": "evt_004",
+      "timestamp": "2026-11-16T15:00:03Z",
+      "event_type": "LLM_RESPONSE",
+      "data": {
+        "content": "I'll execute Python.",
+        "tool_calls": [{ "id": "call_001", "tool": "shell", "arguments": { "command": "python -c 'print(4 + 6)'" } }]
+      }
+    },
+    {
+      "event_id": "evt_005",
+      "timestamp": "2026-11-16T15:00:04Z",
+      "event_type": "TOOL_STARTED",
+      "data": { "tool_call_id": "call_001", "command": "python -c 'print(4 + 6)'" }
+    },
+    {
+      "event_id": "evt_006",
+      "timestamp": "2026-11-16T15:00:05Z",
+      "event_type": "TOOL_COMPLETED",
+      "data": {
+        "tool_call_id": "call_001",
+        "result": { "stdout": "10\n", "stderr": "", "exit_code": 0 }
+      }
+    },
+    {
+      "event_id": "evt_007",
+      "timestamp": "2026-11-16T15:00:06Z",
+      "event_type": "HTTP_REQUEST",
+      "data": { "request_id": "http_001", "method": "GET", "url": "https://api.example.com/status" }
+    },
+    {
+      "event_id": "evt_008",
+      "timestamp": "2026-11-16T15:00:07Z",
+      "event_type": "HTTP_RESPONSE",
+      "data": { "request_id": "http_001", "status_code": 200, "body": { "status": "ok" } }
+    },
+    {
+      "event_id": "evt_009",
+      "timestamp": "2026-11-16T15:00:08Z",
+      "event_type": "LLM_RESPONSE",
+      "data": { "content": "The answer is 10." }
+    },
+    {
+      "event_id": "evt_010",
+      "timestamp": "2026-11-16T15:00:09Z",
+      "event_type": "AGENT_COMPLETED",
+      "data": { "final_answer": "The answer is 10." }
+    },
+    {
+      "event_id": "evt_011",
+      "timestamp": "2026-11-16T15:00:10Z",
+      "event_type": "AGENT_WAITING_FOR_USER"
+    }
+  ],
+  "vm_metrics": [
+    { "timestamp": "2026-11-16T15:00:00Z", "cpu_percent": 32.5, "network_rx_bytes_delta": 2048, "network_tx_bytes_delta": 1024, "vm_state": "RUNNING" },
+    { "timestamp": "2026-11-16T15:00:05Z", "cpu_percent": 8.2, "network_rx_bytes_delta": 512, "network_tx_bytes_delta": 256, "vm_state": "RUNNING" },
+    { "timestamp": "2026-11-16T15:00:10Z", "cpu_percent": 0.4, "network_rx_bytes_delta": 0, "network_tx_bytes_delta": 0, "vm_state": "RUNNING" },
+    { "timestamp": "2026-11-16T15:00:15Z", "cpu_percent": 0.2, "network_rx_bytes_delta": 0, "network_tx_bytes_delta": 0, "vm_state": "RUNNING" },
+    { "timestamp": "2026-11-16T15:00:20Z", "cpu_percent": 0.1, "network_rx_bytes_delta": 0, "network_tx_bytes_delta": 0, "vm_state": "RUNNING" },
+    { "timestamp": "2026-11-16T15:00:25Z", "cpu_percent": 0.1, "network_rx_bytes_delta": 0, "network_tx_bytes_delta": 0, "vm_state": "RUNNING" },
+    { "timestamp": "2026-11-16T15:00:30Z", "cpu_percent": 0.1, "network_rx_bytes_delta": 0, "network_tx_bytes_delta": 0, "vm_state": "RUNNING" },
+    { "timestamp": "2026-11-16T15:00:35Z", "cpu_percent": 0.1, "network_rx_bytes_delta": 0, "network_tx_bytes_delta": 0, "vm_state": "RUNNING" },
+    { "timestamp": "2026-11-16T15:00:40Z", "cpu_percent": 0.1, "network_rx_bytes_delta": 0, "network_tx_bytes_delta": 0, "vm_state": "RUNNING" }
+  ]
+}

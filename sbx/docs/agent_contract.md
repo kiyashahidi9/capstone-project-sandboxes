@@ -42,6 +42,23 @@ To rebuild the conversation, use the `user_message` events (what the user said) 
 - **A question:** print one JSON line `{"type": "question", "text": "..."}`, then exit 0. The user's answer comes back as the next message, with this turn in the history. Only a valid JSON object with `"type": "question"` counts. Any other line is plain output.
 - **stderr:** never shown to the user. Use it for debug logs. If the turn fails, its last 50 lines are saved in the `turn_failed` event.
 
+## Steps
+
+Print one JSON line per step, before the next side effect. Each line is stored as its own event. The `type` field selects the event. The other fields are the event data. A tool is one action the agent can take, whether that action is a sandbox file or an external call such as mail.
+
+Order for one model round:
+
+```json
+{"type": "llm_request", "model": "gpt-4.1", "system": "...", "tools": [], "messages": []}
+{"type": "llm_response", "tool_calls": [{"tool_call_id": "call_1", "name": "run_command", "arguments": {"cmd": "echo hi"}}]}
+{"type": "tool_started", "tool_call_id": "call_1", "name": "run_command", "arguments": {"cmd": "echo hi"}}
+{"type": "tool_completed", "tool_call_id": "call_1", "result": {"exit_code": 0, "stdout": "hi\n", "stderr": ""}}
+```
+
+A text answer is `{"type": "llm_response", "text": "..."}`. A write stores `{"path": "...", "content": "..."}` as its `result`. `llm_request` carries the model, the system prompt, the tool schemas, and the messages. It does not carry an API key.
+
+Playback walks these rows in order and rebuilds the chat from `user_message`, `llm_response`, and `tool_completed`. It uses the stored return. It does not call the model again, and it does not run the tool again. Plain text stays `agent_output`.
+
 ## Example
 
 ```python

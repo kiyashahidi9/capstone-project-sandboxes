@@ -41,7 +41,6 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_ISOLATION", "none")
     db.create_tables()
 
-    # fake VMs
     def boot(sandbox_id=None):
         with closing(db.connect()) as conn:
             conn.execute("INSERT INTO slots (n, sandbox_id) VALUES (4, ?)", (sandbox_id,))
@@ -54,15 +53,13 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setattr(host_manager, "create_sandbox", boot)
     monkeypatch.setattr(host_manager, "destroy_sandbox", destroy)
 
-    # a fake agent
     script = tmp_path / "agent.py"
     script.write_text(AGENT)
     monkeypatch.setenv("AGENT_CMD", shlex.join([sys.executable, str(script)]))
 
-    # send the SDK's requests to the in-process API, and don't wait between polls
     with TestClient(app) as test_client:
         def request(method, url, timeout=None, **kwargs):
-            return test_client.request(method, url, **kwargs)   # TestClient doesn't take a timeout
+            return test_client.request(method, url, **kwargs)
 
         monkeypatch.setattr(sdk.httpx, "request", request)
         original_create = sdk.Sandbox.create.__func__
@@ -93,7 +90,7 @@ def test_two_tasks_in_a_row_and_the_second_sees_the_first(api, monkeypatch, caps
         "earlier messages: 0",
         "done",
         "[run] run it",
-        "earlier messages: 1",   # the history came from the host
+        "earlier messages: 1",
         "done",
     ]
     assert destroyed_line.endswith(" destroyed")

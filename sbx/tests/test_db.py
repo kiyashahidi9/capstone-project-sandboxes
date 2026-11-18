@@ -162,24 +162,22 @@ def column_values(column):
 
 
 def test_merge_keeps_track_a_column_values():
-    # a database made by Track A's branch alone: turn_state, none of the pause states or columns
     use_sandboxes_table(TRACK_A_TABLE, "INSERT INTO sandboxes VALUES (?, 'running', 1000, 1000, 'working')")
 
     db.create_tables()
 
     assert column_values("turn_state") == {ID_A: "working"}
-    assert db.set_state(ID_A, SandboxState.PAUSED) is True   # 4c's states work too
+    assert db.set_state(ID_A, SandboxState.PAUSED) is True
 
 
 def test_merge_keeps_track_c_column_values():
-    # a database made by Track C's branch alone: 4c columns, no turn_state yet
     use_sandboxes_table(TRACK_C_TABLE, "INSERT INTO sandboxes VALUES (?, 'paused', 1000, 1001, '/snap', 1002)")
 
     db.create_tables()
 
     row = db.get_sandbox(ID_A)
     assert (row.state, row.snapshot_dir, row.paused_at) == (SandboxState.PAUSED, "/snap", 1002)
-    assert column_values("turn_state") == {ID_A: "idle"}      # new column starts at its default
+    assert column_values("turn_state") == {ID_A: "idle"}
 
 
 def test_comment_only_change_to_schema_does_not_rebuild(tmp_path, monkeypatch):
@@ -190,7 +188,7 @@ def test_comment_only_change_to_schema_does_not_rebuild(tmp_path, monkeypatch):
 
     db.create_tables()
 
-    assert table_sql("sandboxes") == before   # still the old text, so no rebuild ran
+    assert table_sql("sandboxes") == before
 
 
 def test_rebuilt_table_accepts_the_pause_states():
@@ -297,7 +295,7 @@ def test_transition_sets_and_clears_the_pause_fields(clock):
     running = db.get_sandbox(ID_A)
 
     assert (paused.snapshot_dir, paused.paused_at) == ("/var/sbx/x/snap", 1000)
-    assert (resuming.snapshot_dir, resuming.paused_at) == ("/var/sbx/x/snap", 1000)   # fields not given are kept
+    assert (resuming.snapshot_dir, resuming.paused_at) == ("/var/sbx/x/snap", 1000)
     assert (running.snapshot_dir, running.paused_at) == (None, None)
 
 

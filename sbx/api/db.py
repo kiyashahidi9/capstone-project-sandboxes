@@ -33,10 +33,10 @@ def connect() -> sqlite3.Connection:
     """Opens a fresh connection to the state database using the shared SQLite rules."""
     conn = sqlite3.connect(
         db_path(),
-        timeout=DB_BUSY_TIMEOUT,  # a second writer waits instead of failing with "database is locked"
-        isolation_level=None,     # autocommit: each statement is its own transaction
+        timeout=DB_BUSY_TIMEOUT,
+        isolation_level=None,
     )
-    conn.execute("PRAGMA journal_mode=WAL")   # readers aren't blocked while someone writes
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -59,7 +59,7 @@ def sandboxes_table_from_schema() -> str:
     with closing(sqlite3.connect(":memory:")) as scratch:
         scratch.executescript(SCHEMA_PATH.read_text())
         (sql,) = scratch.execute("SELECT sql FROM sqlite_master WHERE name = 'sandboxes'").fetchone()
-    return sql   # SQLite stores it without "IF NOT EXISTS", so it always creates the table
+    return sql
 
 
 def comparable_sql(sql: str) -> str:
@@ -87,7 +87,7 @@ def shared_columns(conn: sqlite3.Connection, old_table: str, new_table: str) -> 
 
 def rebuild_sandboxes_table(conn: sqlite3.Connection) -> None:
     """Remakes the sandboxes table, keeping every row, if schema.sql now defines it differently."""
-    conn.execute("BEGIN IMMEDIATE")   # a second server starting at the same time waits, then sees it's done
+    conn.execute("BEGIN IMMEDIATE")
     try:
         wanted = sandboxes_table_from_schema()
         if comparable_sql(live_sandboxes_table(conn)) != comparable_sql(wanted):
@@ -100,11 +100,6 @@ def rebuild_sandboxes_table(conn: sqlite3.Connection) -> None:
 
 def replace_sandboxes_table(conn: sqlite3.Connection, create_sql: str) -> None:
     """Swaps the sandboxes table for a new one, copying over every column the two share."""
-    # The old table is renamed first (not SQLite's usual create-new-first order) so schema.sql's
-    # statement can create "sandboxes" as written. Safe only while nothing (foreign key, view,
-    # trigger) points at sandboxes: a rename would carry that reference over to sandboxes_old.
-    # Shared columns keep their values, so columns added on another branch survive a merge;
-    # new columns start at their default.
     conn.execute("ALTER TABLE sandboxes RENAME TO sandboxes_old")
     conn.execute(create_sql)
     shared = ", ".join(shared_columns(conn, "sandboxes_old", "sandboxes"))
@@ -179,7 +174,6 @@ def transition(
 ) -> bool:
     """Moves a sandbox to a new state only if it's in one of the expected ones; says whether it moved."""
     require_transition_fields(fields)
-    # one UPDATE does the check and the write, so two requests can't both pass the check
     assignments = ", ".join(["state = ?", "updated_at = ?", *(f"{name} = ?" for name in fields)])
     placeholders = ", ".join("?" for _ in from_states)
     with closing(connect()) as conn:
@@ -218,7 +212,7 @@ def append_event(sandbox_id: str, event_type: EventType, data: dict) -> int:
                 event_type,
                 json.dumps(data),
                 now(),
-                sandbox_id,   # for the WHERE: count only this sandbox's events
+                sandbox_id,
             ),
         ).fetchone()
     return row["seq"]

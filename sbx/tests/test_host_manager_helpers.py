@@ -461,3 +461,53 @@ def test_resume_still_succeeds_if_the_clock_cannot_be_set(resumable, fake_guest,
     timings = host_manager.resume_sandbox(ID_A)
     assert timings["clock_set"] is False
     assert killed == []
+
+
+# --- CPU (cgroup cpu.stat) --------------------------------------------------
+
+@pytest.fixture
+def fake_cgroup_root(tmp_path, monkeypatch):
+    """Point CGROUP_ROOT at a temporary folder instead of /sys/fs/cgroup/sandboxes."""
+    root = str(tmp_path / "cgroup")
+    os.makedirs(root)
+    monkeypatch.setattr(host_manager, "CGROUP_ROOT", root)
+    return root
+
+
+def write_cpu_stat(sandbox_id, usage_usec):
+    """Write a cgroup cpu.stat that includes usage_usec among the other counters."""
+    folder = host_manager.cgroup_dir(sandbox_id)
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, "cpu.stat"), "w", encoding="utf-8") as stat:
+        stat.write(f"user_usec {usage_usec // 2}\n")
+        stat.write(f"usage_usec {usage_usec}\n")
+        stat.write(f"system_usec {usage_usec // 2}\n")
+
+
+def test_read_cpu_usage_usec_returns_none_when_the_file_is_missing(fake_cgroup_root):
+    """A killed VM has no cgroup, so there is no usage to read."""
+    assert host_manager.read_cpu_usage_usec(ID_A) is None
+
+
+def test_read_cpu_usage_usec_reads_the_counter(fake_cgroup_root):
+    """usage_usec is the total CPU time, in microseconds, from cpu.stat."""
+    write_cpu_stat(ID_A, 2_500_000)
+    assert host_manager.read_cpu_usage_usec(ID_A) == 2_500_000
+
+
+def test_read_cpu_usage_usec_rejects_a_bad_id(fake_cgroup_root):
+    with pytest.raises(ValueError):
+        host_manager.read_cpu_usage_usec("../etc")
+
+
+def test_cpu_percent_from_two_readings():
+    """Half a core-second of CPU in one wall second is 50 percent of one core."""
+    assert host_manager.cpu_percent(1_000_000, 1_500_000, 1.0) == 50.0
+
+
+def test_cpu_percent_is_none_without_a_span():
+    """The first reading, a zero gap, or a counter that went backwards is not a percent."""
+    assert host_manager.cpu_percent(None, 1_000_000, 1.0) is None
+    assert host_manager.cpu_percent(1_000_000, None, 1.0) is None
+    assert host_manager.cpu_percent(1_000_000, 1_500_000, 0.0) is None
+    assert host_manager.cpu_percent(1_500_000, 1_000_000, 1.0) is None

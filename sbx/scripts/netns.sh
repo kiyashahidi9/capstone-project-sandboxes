@@ -80,7 +80,7 @@ vars() {
 }
 
 in_ns()     { ip netns exec "$NS" "$@"; }
-guest_ssh() { ssh "${SSH_OPTS[@]}" "root@$CLONE_IP" "$@"; }         # the way the host normally reaches the VM
+guest_ssh() { ssh "${SSH_OPTS[@]}" "root@$CLONE_IP" "$@"; }
 
 host_iface() {
   local dev
@@ -133,7 +133,6 @@ step5_host() {
   ip route add "$CLONE_IP" via "$VETH_N_IP"
   sysctl -qw net.ipv4.ip_forward=1
   ipt_ensure nat    POSTROUTING -s "$CLONE_NET" -o "$wan" -j MASQUERADE
-  # Narrow FORWARD rules instead of "iptables -P FORWARD ACCEPT" (which opens the whole host)
   ipt_ensure filter FORWARD -s "$CLONE_NET" -j ACCEPT
   ipt_ensure filter FORWARD -d "$CLONE_NET" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 }

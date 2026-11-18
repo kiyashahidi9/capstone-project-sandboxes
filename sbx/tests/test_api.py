@@ -767,7 +767,7 @@ def test_message_after_the_turn_ends_is_accepted(client, monkeypatch):
     fake.wait()
 
     assert second.status_code == 202
-    assert second.json() == {"seq": 3}   # 1 = first message, 2 = turn_finished
+    assert second.json() == {"seq": 3}
     events = client.get(f"/sandboxes/{sandbox_id}/events").json()["events"]
     assert [event["type"] for event in events] == [
         "user_message",

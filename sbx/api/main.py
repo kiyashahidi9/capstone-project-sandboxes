@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -45,6 +46,8 @@ from api.models import (
     SandboxListResponse,
     SandboxState,
 )
+from control.live import SampleMemory
+from control.heartbeat import run_until_stopped
 from runner import runner
 
 
@@ -68,7 +71,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     runner.recover_interrupted_turns()
     recover_interrupted_changes()
     clean_up_after_restart()
-    yield
+    stop = threading.Event()
+    memory = SampleMemory()
+    beat = threading.Thread(
+        target=run_until_stopped,
+        args=(memory, stop),
+        name="sbx-beat",
+        daemon=True,
+    )
+    app.state.beat_stop = stop
+    app.state.beat_memory = memory
+    app.state.beat_thread = beat
+    beat.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        beat.join(timeout=2)
 
 
 app = FastAPI(title="sbx", lifespan=lifespan)
@@ -153,7 +172,7 @@ def read_file(sandbox_id: str, path: str) -> str:
 @app.put("/sandboxes/{sandbox_id}/files", dependencies=[ADMIN_OR_TURN])
 async def write_file(sandbox_id: str, path: str, request: Request) -> dict[str, bool]:
     """Saves the uploaded text to a file inside the sandbox, resuming it first if it's paused."""
-    await run_in_threadpool(ensure_running, sandbox_id)   # may wait on the lock, so off the event loop
+    await run_in_threadpool(ensure_running, sandbox_id)
     content = text_from_body(await request.body())
     await run_in_threadpool(store_file, sandbox_id, path, content)
     return {"ok": True}
@@ -175,11 +194,9 @@ def send_message(sandbox_id: str, request: MessageRequest) -> MessageResponse:
     resumes a paused sandbox first, so the reply is just slower (plan 4c)
     answers 409 if the sandbox can't run (starting, destroyed) or a turn is already running
     """
-    # before claiming the turn: ensure_running takes and frees the lock, then the runner takes it
     ensure_running(sandbox_id)
     require_turn(sandbox_id)
 
-    # the message is an event too, so the history has the whole conversation
     seq = db.append_event(sandbox_id, EventType.USER_MESSAGE, {"text": request.text})
 
     start_turn_in_background(sandbox_id)

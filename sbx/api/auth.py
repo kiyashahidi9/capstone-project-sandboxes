@@ -5,8 +5,6 @@ a turn token, made by the runner for one turn, may only call exec and files on t
 no key or an unknown key -> 401; a turn token used anywhere else -> 403
 """
 
-## IMPORTS ##
-
 from __future__ import annotations
 
 import os

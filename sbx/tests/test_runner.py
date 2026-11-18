@@ -36,6 +36,58 @@ print(json.dumps({"type": "question", "text": "which port?"}))
 print('{"type": "note"}')
 """
 
+# one model round: the request, the tool call, the action, both results, then plain text
+RECORDS_STEPS = r"""
+import json
+print(json.dumps({
+    "type": "llm_request",
+    "model": "gpt-4.1",
+    "system": "You are a coding agent.",
+    "tools": [{"type": "function", "function": {"name": "run_command"}}],
+    "messages": [{"role": "user", "content": "do the thing"}],
+}))
+print(json.dumps({
+    "type": "llm_response",
+    "tool_calls": [{
+        "tool_call_id": "call_1",
+        "name": "write_file",
+        "arguments": {"path": "hello.py", "content": "print('hi')"},
+    }],
+}))
+print(json.dumps({
+    "type": "tool_started",
+    "tool_call_id": "call_1",
+    "name": "write_file",
+    "arguments": {"path": "hello.py", "content": "print('hi')"},
+}))
+print(json.dumps({
+    "type": "tool_completed",
+    "tool_call_id": "call_1",
+    "result": {"path": "hello.py", "content": "print('hi')"},
+}))
+print(json.dumps({
+    "type": "llm_response",
+    "tool_calls": [{
+        "tool_call_id": "call_2",
+        "name": "run_command",
+        "arguments": {"cmd": "echo hi"},
+    }],
+}))
+print(json.dumps({
+    "type": "tool_started",
+    "tool_call_id": "call_2",
+    "name": "run_command",
+    "arguments": {"cmd": "echo hi"},
+}))
+print(json.dumps({
+    "type": "tool_completed",
+    "tool_call_id": "call_2",
+    "result": {"exit_code": 0, "stdout": "hi\n", "stderr": ""},
+}))
+print(json.dumps({"type": "llm_response", "text": "done"}))
+print("still plain text")
+"""
+
 SLEEPS = """
 import time
 print("starting", flush=True)
@@ -60,7 +112,7 @@ print("secret: " + str(os.environ.get("NOT_FOR_AGENTS")))
 def database(tmp_path, monkeypatch):
     """A fresh state.db with one running sandbox."""
     monkeypatch.setenv("SBX_DB", str(tmp_path / "state.db"))
-    monkeypatch.setenv("AGENT_ISOLATION", "none")   # no systemd here; tests/test_runner.py checks its command separately
+    monkeypatch.setenv("AGENT_ISOLATION", "none")
     db.create_tables()
     db.insert_sandbox(SANDBOX_ID)
     db.set_state(SANDBOX_ID, SandboxState.RUNNING)
@@ -123,6 +175,60 @@ def test_exit_one_fails_the_turn_with_the_end_of_stderr(tmp_path, monkeypatch):
     assert_turn_over()
 
 
+def test_a_step_line_is_stored_as_its_own_event(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, RECORDS_STEPS)
+    send()
+
+    runner.run_turn(SANDBOX_ID)
+
+    assert events() == [
+        (EventType.USER_MESSAGE, {"text": "do the thing"}),
+        (EventType.TURN_STARTED, {}),
+        (EventType.LLM_REQUEST, {
+            "model": "gpt-4.1",
+            "system": "You are a coding agent.",
+            "tools": [{"type": "function", "function": {"name": "run_command"}}],
+            "messages": [{"role": "user", "content": "do the thing"}],
+        }),
+        (EventType.LLM_RESPONSE, {
+            "tool_calls": [{
+                "tool_call_id": "call_1",
+                "name": "write_file",
+                "arguments": {"path": "hello.py", "content": "print('hi')"},
+            }],
+        }),
+        (EventType.TOOL_STARTED, {
+            "tool_call_id": "call_1",
+            "name": "write_file",
+            "arguments": {"path": "hello.py", "content": "print('hi')"},
+        }),
+        (EventType.TOOL_COMPLETED, {
+            "tool_call_id": "call_1",
+            "result": {"path": "hello.py", "content": "print('hi')"},
+        }),
+        (EventType.LLM_RESPONSE, {
+            "tool_calls": [{
+                "tool_call_id": "call_2",
+                "name": "run_command",
+                "arguments": {"cmd": "echo hi"},
+            }],
+        }),
+        (EventType.TOOL_STARTED, {
+            "tool_call_id": "call_2",
+            "name": "run_command",
+            "arguments": {"cmd": "echo hi"},
+        }),
+        (EventType.TOOL_COMPLETED, {
+            "tool_call_id": "call_2",
+            "result": {"exit_code": 0, "stdout": "hi\n", "stderr": ""},
+        }),
+        (EventType.LLM_RESPONSE, {"text": "done"}),
+        (EventType.AGENT_OUTPUT, {"text": "still plain text"}),
+        (EventType.TURN_FINISHED, {"exit_code": 0}),
+    ]
+    assert_turn_over()
+
+
 def test_a_question_line_becomes_a_question_event(tmp_path, monkeypatch):
     use_agent(tmp_path, monkeypatch, ASKS)
     send()
@@ -131,7 +237,7 @@ def test_a_question_line_becomes_a_question_event(tmp_path, monkeypatch):
 
     assert events()[2:] == [
         (EventType.QUESTION, {"text": "which port?"}),
-        (EventType.AGENT_OUTPUT, {"text": '{"type": "note"}'}),   # JSON, but not a question
+        (EventType.AGENT_OUTPUT, {"text": '{"type": "note"}'}),
         (EventType.TURN_FINISHED, {"exit_code": 0}),
     ]
     assert_turn_over()
@@ -166,7 +272,6 @@ def test_the_agent_gets_the_message_environment_and_earlier_events(tmp_path, mon
         "message: second",
         f"sandbox: {SANDBOX_ID}",
         "api: http://127.0.0.1:8000",
-        # the first turn, but not the second message, which is on stdin
         "history: " + ",".join(["user_message", "turn_started"] + ["agent_output"] * 5 + ["turn_finished"]),
         "secret: None",
     ]
@@ -212,7 +317,6 @@ def test_stop_turn_kills_the_agent_and_frees_the_sandbox(tmp_path, monkeypatch):
 
     runner.stop_turn(SANDBOX_ID)
 
-    # stop_turn returns only after the turn is over
     assert_turn_over()
     turn_thread.join(WAIT)
     assert not turn_thread.is_alive()
@@ -262,7 +366,7 @@ def test_each_turn_gets_its_own_token_that_ends_with_the_turn(tmp_path, monkeypa
     printed = [data["text"] for kind, data in events() if kind == EventType.AGENT_OUTPUT]
     first_token, first_admin, second_token, second_admin = printed
     assert first_token and second_token and first_token != second_token
-    assert first_admin == second_admin == "None"    # the agent never sees the admin key
+    assert first_admin == second_admin == "None"
     assert auth.sandbox_for_turn_token(first_token) is None
     assert auth.sandbox_for_turn_token(second_token) is None
 
@@ -292,7 +396,7 @@ def test_the_systemd_command_locks_the_agent_down(monkeypatch):
 
 
 def test_secrets_go_in_the_environment_file_not_the_command_line(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENT_ISOLATION", "none")   # so turn_file uses the temp folder
+    monkeypatch.setenv("AGENT_ISOLATION", "none")
     path = runner.write_environment_file({"OPENAI_API_KEY": "sk-secret", "SANDBOX_TOKEN": "tok"})
 
     try:
