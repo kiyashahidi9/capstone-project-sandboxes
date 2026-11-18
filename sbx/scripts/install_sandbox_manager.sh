@@ -81,6 +81,8 @@ EOF
 
 die()       { echo "error: $*" >&2; exit 1; }
 log()       { echo "==> $*"; }
+# step N text: "N. text" on its own, or "8.N text" when setup_host.sh runs it as its step 8 (STEP_PREFIX=8)
+step()      { local n=$1; shift; if [[ -n ${STEP_PREFIX:-} ]]; then log "$STEP_PREFIX.$n $*"; else log "$n. $*"; fi; }
 need_root() { (( EUID == 0 )) || die "run as root (sudo)"; }
 
 # ---------------------------------------------------------------- mount helpers
@@ -109,29 +111,29 @@ image_has_python() { [[ -L $MNT/usr/bin/python3 || -x $MNT/usr/bin/python3 ]]; }
 cmd_install() {
   need_root
   local f
-  log "1. checking ${AGENT_FILES[*]} parse"
+  step 1 "checking ${AGENT_FILES[*]} parse"
   for f in "${AGENT_FILES[@]}"; do
     [[ -f $AGENT_SRC_DIR/$f ]] || die "missing $AGENT_SRC_DIR/$f"
     python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' "$AGENT_SRC_DIR/$f"
   done
 
-  log "   mounting $ROOTFS"
+  log "    mounting $ROOTFS"
   mount_rootfs rw
   image_has_python || die "image has no /usr/bin/python3"
 
-  log "   removing the old guest agent (renamed to sandbox manager), if present"
+  log "    removing the old guest agent (renamed to sandbox manager), if present"
   remove_old_agent
 
-  log "2. copying agent -> $AGENT_DST_DIR/"
+  step 2 "copying agent -> $AGENT_DST_DIR/"
   for f in "${AGENT_FILES[@]}"; do
     install -D -m 0644 "$AGENT_SRC_DIR/$f" "$MNT$AGENT_DST_DIR/$f"
   done
   chmod 0755 "$MNT$AGENT_DST"   # only the entry point is executable
 
-  log "3. writing $UNIT"
+  step 3 "writing $UNIT"
   printf '%s\n' "$SERVICE" > "$MNT$UNIT"
 
-  log "4. enabling it at boot, unmounting"
+  step 4 "enabling it at boot, unmounting"
   mkdir -p "$(dirname "$MNT$UNIT_LINK")"
   ln -sf "$UNIT" "$MNT$UNIT_LINK"
   unmount_rootfs

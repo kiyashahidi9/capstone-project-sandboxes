@@ -1,21 +1,17 @@
 # Bicycle end-to-end test: every track on the GCP host
 
-Runs the whole system on real Firecracker, from the `track-c-bicycle` branch. It covers everything the skateboard test covered, plus what the bicycle stage added to Track C. Takes about 75 minutes.
+The whole system on real Firecracker, from the `track-c-bicycle` branch. About 75 minutes.
 
-**What it tests**
-
-- Part 1, Milestone 1: create, exec, files, destroy, auth.
-- Part 2, Track C: pause and resume by hand, a resume that waits for a pause, and the sandbox manager's own checklist inside a real VM (`/sync`, `/clock`).
-- Part 3, Track A: the agent on the host, through the chat.
-- Part 4, Track B: the sleep judge auto-pauses an idle sandbox, and a message wakes it.
-- Part 5, Track B: agent steps are stored as events.
-- Part 6, Track A: guardrails.
-- Part 7, Track C (bicycle): recovery after a crash: a pause cut off halfway, a VM that died, a paused sandbox kept across a restart, a broken snapshot, and leftovers nothing tracks.
-- Part 8, Track C (bicycle): pause and resume timings at 512 MiB, 1 GiB and 2 GiB.
-
-**What it doesn't test:** timings under load, or many sandboxes at once.
-
-**New names on this branch:** `node_agent.py` is now `host_manager.py` (runs on the host), and `guest_agent/` is now `sandbox_manager/` (runs inside each VM). The base image has to be rebuilt once for the rename, which Part 0 does.
+| Part | Tests |
+|---|---|
+| 1 | Create, exec, files, destroy, auth |
+| 2 | Pause and resume by hand |
+| 3 | The agent through the chat |
+| 4 | Auto-pause and wake-up |
+| 5 | Recorded agent steps |
+| 6 | Guardrails |
+| 7 | Recovery after a crash (new) |
+| 8 | Pause and resume timings (new) |
 
 ## Terminals
 
@@ -38,12 +34,8 @@ gcloud compute instances start sbx-node-1 --zone=us-east1-b
 **VM-1:**
 
 ```bash
-git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git ~/capstone-project-sandboxes   # first time only
 cd ~/capstone-project-sandboxes
 git fetch && git checkout track-c-bicycle && git pull
-cp .env.example .env                                               # first time only
-python3 -c "import secrets; print(secrets.token_urlsafe(32))"      # first time only: the admin key
-sudo nano .env      # set SANDBOX_ADMIN_KEY and OPENAI_API_KEY; leave AGENT_CMD as it is
 cd sbx
 sudo scripts/setup_host.sh          # rebuilds the base image with the sandbox manager
 sudo scripts/setup_agents.sh
@@ -59,10 +51,8 @@ pgrep -a firecracker; ip netns list; pgrep -af uvicorn
 **Laptop:**
 
 ```bash
-git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git   # first time only
 cd capstone-project-sandboxes
 git fetch && git checkout track-c-bicycle && git pull
-cp .env.example .env      # first time only; set SANDBOX_ADMIN_KEY to the host's value
 cd sbx
 uv sync
 ```
@@ -358,7 +348,7 @@ sudo bash scripts/check_guardrails.sh
 
 ## Part 7: Recovery after a crash (Track C, bicycle)
 
-On startup, the API settles every sandbox a crash left half-way through a pause or resume, then destroys sandboxes it can no longer use and removes leftovers it doesn't track. Each step below breaks something, restarts the API, and checks what startup did.
+Each step breaks something, restarts the API, and checks what startup cleaned up.
 
 **VM-1:** Ctrl+C, then start the normal API again and leave it running:
 

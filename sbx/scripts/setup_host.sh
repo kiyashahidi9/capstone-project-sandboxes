@@ -180,7 +180,7 @@ fi
 # ---------------------------------------------------------------- 8-9: sandbox manager and python
 
 log "8. sandbox manager"
-"$SCRIPTS/install_sandbox_manager.sh" install
+STEP_PREFIX=8 "$SCRIPTS/install_sandbox_manager.sh" install
 
 log "9. python deps (uv sync)"
 chown -R "$REAL_USER": "$REPO"             # the repo and its .venv belong to you, not root
