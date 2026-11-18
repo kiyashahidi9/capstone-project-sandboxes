@@ -198,7 +198,7 @@ sudo -u "$REAL_USER" -H "$UV" sync --locked --directory "$(dirname "$VENV")" -q
 log "10. checklist"
 FAILS=0
 check() { local d=$1; shift
-  if "$@" &>/dev/null; then echo "  [x] $d"; else echo "  [ ] $d"; FAILS=$((FAILS + 1)); fi; }
+  if "$@" &>/dev/null; then echo "    [x] $d"; else echo "    [ ] $d"; FAILS=$((FAILS + 1)); fi; }
 check "kvm-ok passes"                          kvm-ok
 check "cgroups v2"                             test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs
 check "firecracker $FC_VERSION on PATH"        bash -c "firecracker --version | grep -q 'Firecracker $FC_VERSION'"

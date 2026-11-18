@@ -81,8 +81,11 @@ EOF
 
 die()       { echo "error: $*" >&2; exit 1; }
 log()       { echo "==> $*"; }
-# step N text: "N. text" on its own, or "8.N text" when setup_host.sh runs it as its step 8 (STEP_PREFIX=8)
-step()      { local n=$1; shift; if [[ -n ${STEP_PREFIX:-} ]]; then log "$STEP_PREFIX.$n $*"; else log "$n. $*"; fi; }
+# On its own, steps print as "==> 1. text". When setup_host.sh runs this as its step 8 (STEP_PREFIX=8),
+# they print indented under that step as "    8.1 text", so the two scripts' numbers don't mix.
+step()      { local n=$1; shift; if [[ -n ${STEP_PREFIX:-} ]]; then echo "    $STEP_PREFIX.$n $*"; else log "$n. $*"; fi; }
+detail()    { if [[ -n ${STEP_PREFIX:-} ]]; then echo "        $*"; else log "   $*"; fi; }   # a line under a step
+finished()  { if [[ -n ${STEP_PREFIX:-} ]]; then echo "    $*"; else log "$*"; fi; }        # the closing line
 need_root() { (( EUID == 0 )) || die "run as root (sudo)"; }
 
 # ---------------------------------------------------------------- mount helpers
@@ -117,11 +120,11 @@ cmd_install() {
     python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' "$AGENT_SRC_DIR/$f"
   done
 
-  log "    mounting $ROOTFS"
+  detail "mounting $ROOTFS"
   mount_rootfs rw
   image_has_python || die "image has no /usr/bin/python3"
 
-  log "    removing the old guest agent (renamed to sandbox manager), if present"
+  detail "removing the old guest agent (renamed to sandbox manager), if present"
   remove_old_agent
 
   step 2 "copying agent -> $AGENT_DST_DIR/"
@@ -138,7 +141,7 @@ cmd_install() {
   ln -sf "$UNIT" "$MNT$UNIT_LINK"
   unmount_rootfs
 
-  log "installed"
+  finished "installed"
   local copies=("$FC_DIR"/vm*.ext4)
   if [[ -e ${copies[0]} ]]; then
     echo "note: these VM disks were made before this install and have the old agent:"
