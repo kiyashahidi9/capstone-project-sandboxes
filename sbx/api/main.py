@@ -16,6 +16,7 @@ from api.helpers import (
     HTTP_CREATED,
     boot_sandbox,
     build_create_response,
+    clean_up_after_restart,
     destroy,
     ensure_running,
     fetch_file,
@@ -61,11 +62,12 @@ ADMIN_OR_TURN = Depends(require_admin_or_turn)   # exec and files: also the turn
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Gets the database ready, then ends turns and settles pauses or resumes a crash cut off, before taking requests."""
+    """Gets the database ready, then settles what a crash or a dead VM left behind, before taking requests."""
     require_admin_key_set()
     db.create_tables()
     runner.recover_interrupted_turns()
     recover_interrupted_changes()
+    clean_up_after_restart()
     yield
 
 

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import logging
 import threading
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Callable, Iterator
 
 import httpx
 from fastapi import HTTPException
@@ -21,6 +22,8 @@ from api.models import (
     SandboxState,
 )
 
+
+logger = logging.getLogger(__name__)
 
 HTTP_NOT_FOUND = 404
 HTTP_CONFLICT = 409
@@ -285,6 +288,51 @@ def recover_interrupted_changes() -> None:
             settle_pausing(row.id)
         elif row.state == SandboxState.RESUMING:
             settle_resuming(row.id)
+
+
+# ---------------------------------------------------------------------------
+# Startup cleanup: sandboxes a crash or a dead VM left behind (2a)
+#
+# Runs after recover_interrupted_changes(), so every live row is starting,
+# running or paused, never half-way through a pause or resume.
+# ---------------------------------------------------------------------------
+
+def is_gone(row: SandboxRow) -> bool:
+    """Checks whether a live sandbox can no longer be used, so it should be destroyed."""
+    if row.state == SandboxState.STARTING:
+        return True   # a crash cut off the create, so nobody was ever given this ID
+    if row.state == SandboxState.PAUSED:
+        return not snapshot_is_complete(row.id)   # no VM on purpose: only a broken snapshot means it's lost
+    return not node_agent.is_sandbox_running(row.id)
+
+
+def run_logging_failure(step: Callable[[str], None], sandbox_id: str) -> None:
+    """Runs one cleanup step on a sandbox, logging a failure instead of stopping the server from starting."""
+    try:
+        step(sandbox_id)
+    except Exception:
+        logger.exception("startup cleanup failed for %s; leaving it as it is", sandbox_id)
+
+
+def destroy_gone_sandboxes() -> None:
+    """Destroys every sandbox the database calls live but that can no longer be used."""
+    for row in db.list_live_sandboxes():
+        if is_gone(row):
+            run_logging_failure(tear_down, row.id)
+
+
+def destroy_untracked_sandboxes() -> None:
+    """Removes every sandbox left on the host that no live row keeps track of."""
+    live_ids = {row.id for row in db.list_live_sandboxes()}
+    for sandbox_id in node_agent.list_host_sandboxes():
+        if sandbox_id not in live_ids:
+            run_logging_failure(node_agent.destroy_sandbox, sandbox_id)
+
+
+def clean_up_after_restart() -> None:
+    """On startup, destroys sandboxes whose VM or snapshot is gone, then leftovers nothing tracks."""
+    destroy_gone_sandboxes()
+    destroy_untracked_sandboxes()
 
 
 # ---------------------------------------------------------------------------

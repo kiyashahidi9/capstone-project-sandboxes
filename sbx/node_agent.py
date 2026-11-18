@@ -237,7 +237,7 @@ DB_BUSY_TIMEOUT = 5.0             # seconds a writer waits for another writer be
 
 def open_db() -> sqlite3.Connection:
     """Open the state database, creating the file and the slots table if needed."""
-    os.makedirs(SANDBOXES_ROOT, exist_ok=True)
+    os.makedirs(os.path.dirname(db_path()), exist_ok=True)   # /var/sbx on the host; SBX_DB's folder in tests
     conn = sqlite3.connect(
         db_path(),
         timeout=DB_BUSY_TIMEOUT,  # a second writer waits instead of failing with "database is locked"
