@@ -6,14 +6,14 @@ from http.server import ThreadingHTTPServer
 import httpx
 import pytest
 
-# the guest agent runs as a plain script inside the VM, importing its own helpers.py
+# the sandbox manager (guest_agent/) runs as a plain script inside the VM, importing its own helpers.py
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "guest_agent"))
 import guest_agent  # noqa: E402
 
 
 @pytest.fixture
 def agent():
-    """Start the real guest agent on a free local port and return a client for it."""
+    """Start the real sandbox manager on a free local port and return a client for it."""
     server = ThreadingHTTPServer(("127.0.0.1", 0), guest_agent.Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     with httpx.Client(base_url=f"http://127.0.0.1:{server.server_port}") as client:

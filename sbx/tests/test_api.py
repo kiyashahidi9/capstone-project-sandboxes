@@ -229,7 +229,7 @@ def test_get_destroyed_sandbox_is_still_found(client, monkeypatch):
 
 
 def fake_destroy(calls: list[str]):
-    """Pretends the node agent stopped the VM and freed its slot."""
+    """Pretends the host manager (node_agent.py) stopped the VM and freed its slot."""
     def destroy(sandbox_id: str) -> None:
         calls.append(sandbox_id)
         with closing(db.connect()) as conn:
@@ -310,7 +310,7 @@ def make_running_sandbox(client, monkeypatch) -> str:
 
 
 def scripted_exec(calls: list[dict], result: dict):
-    """Pretends the guest agent ran a command and records what it was asked."""
+    """Pretends the sandbox manager (guest_agent/) ran a command and records what it was asked."""
     def run(sandbox_id: str, cmd: str, cwd: str = "/root", background: bool = False, timeout: int = 600) -> dict:
         calls.append({
             "sandbox_id": sandbox_id,
@@ -324,7 +324,7 @@ def scripted_exec(calls: list[dict], result: dict):
 
 
 def guest_http_error(status: int, message: str) -> httpx.HTTPStatusError:
-    """Builds the error httpx raises when the guest agent answers with an HTTP error."""
+    """Builds the error httpx raises when the sandbox manager answers with an HTTP error."""
     request = httpx.Request("POST", "http://guest/exec")
     response = httpx.Response(status, json={"error": message}, request=request)
     return httpx.HTTPStatusError(message, request=request, response=response)

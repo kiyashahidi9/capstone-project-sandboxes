@@ -336,11 +336,11 @@ def clean_up_after_restart() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Talking to the guest agent
+# Talking to the sandbox manager (guest_agent/)
 # ---------------------------------------------------------------------------
 
 def guest_error_to_http(error: httpx.HTTPStatusError) -> HTTPException:
-    """Turns a guest agent error into one for the client: its 4xx passes through, anything else is 502."""
+    """Turns a sandbox manager error into one for the client: its 4xx passes through, anything else is 502."""
     status = error.response.status_code
     if not 400 <= status < 500:
         status = HTTP_BAD_GATEWAY
@@ -355,7 +355,7 @@ def guest_error_to_http(error: httpx.HTTPStatusError) -> HTTPException:
 
 
 def run_command(sandbox_id: str, request: ExecuteRequest) -> dict:
-    """Runs a command inside the sandbox and gives back the guest agent's raw answer."""
+    """Runs a command inside the sandbox and gives back the sandbox manager's raw answer."""
     try:
         return node_agent.exec(
             sandbox_id,

@@ -11,7 +11,7 @@ except OSError:
 
 DEFAULT_API = os.environ.get("SANDBOX_API", "http://localhost:8000")
 
-# Creating waits for the VM to boot; exec can run up to the guest agent's 600 s default.
+# Creating waits for the VM to boot; exec can run up to the sandbox manager's 600 s default.
 CREATE_TIMEOUT = 120
 EXEC_TIMEOUT = 660
 DEFAULT_TIMEOUT = 30
@@ -92,7 +92,7 @@ class Sandbox:
     - 404: No sandbox exists with this id.
     - 409: The sandbox is in the wrong state for this call, e.g. it has been
       destroyed, or you paused a sandbox that is already paused.
-    - 502: The API could not reach the guest agent inside the VM.
+    - 502: The API could not reach the sandbox manager (guest_agent/) inside the VM.
 
     If the API itself cannot be reached, httpx exceptions such as
     `httpx.ConnectError` and `httpx.TimeoutException` are raised unchanged.

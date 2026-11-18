@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# install_guest_agent.sh - bake the guest agent into the base image (Milestone 1e)
+# install_guest_agent.sh - bake the sandbox manager (guest_agent/) into the base image (Milestone 1e)
 #
-# The guest agent (guest_agent/guest_agent.py) is a small HTTP server inside every VM
+# The sandbox manager (guest_agent/guest_agent.py) is a small HTTP server inside every VM
 # on port 49983. The host uses it to run commands and read/write files in the VM.
 #
 # install does:
@@ -27,7 +27,7 @@
   # mount | grep -E "rootfs|/mnt/rootfs"          # should print nothing
 # if it prints something: sudo umount /mnt/rootfs
 
-# 1. Bake the guest agent into the base image, then check it
+# 1. Bake the sandbox manager into the base image, then check it
   # chmod +x scripts/install_guest_agent.sh
   # sudo scripts/install_guest_agent.sh
   # sudo scripts/install_guest_agent.sh verify
@@ -208,7 +208,7 @@ cmd_test() {
   command -v jq >/dev/null || die "jq not installed (sudo apt install jq)"
   URL=${AGENT_URL:-http://10.201.0.$1:$PORT}
   FAILS=0
-  echo "guest agent in VM $1  ($URL)"
+  echo "sandbox manager in VM $1  ($URL)"
 
   echo " basics"
   check "GET /health -> ok"                    expect '.ok == true' GET /health

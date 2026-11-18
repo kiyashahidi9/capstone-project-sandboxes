@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Sandbox manager (guest_agent/): runs inside each sandbox and runs commands, handles files, flushes the disk and sets the clock."""
 import json
 import os
 import time
@@ -192,6 +193,6 @@ if __name__ == "__main__":
     server.daemon_threads = True
 
     # flush=True: show up in the systemd logs right away
-    print(f"guest agent listening on {HOST}:{PORT}", flush=True)
+    print(f"sandbox manager listening on {HOST}:{PORT}", flush=True)
 
     server.serve_forever()

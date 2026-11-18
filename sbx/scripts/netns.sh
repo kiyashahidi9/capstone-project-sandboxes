@@ -189,10 +189,10 @@ cmd_start() {
   fc_put /network-interfaces/eth0 "{\"iface_id\":\"eth0\",\"guest_mac\":\"$GUEST_MAC\",\"host_dev_name\":\"$TAP\"}"
   fc_put /actions '{"action_type":"InstanceStart"}'
 
-    log "waiting for the guest agent on $CLONE_IP:49983"
+    log "waiting for the sandbox manager (guest_agent/) on $CLONE_IP:49983"
     for i in $(seq 1 60); do curl -sf --max-time 1 "http://$CLONE_IP:49983/health" >/dev/null && break; sleep 1; done
     curl -sf --max-time 2 "http://$CLONE_IP:49983/health" >/dev/null \
-      || die "guest agent never answered (disk older than install_guest_agent.sh? remove $disk). See $console"
+      || die "sandbox manager never answered (disk older than install_guest_agent.sh? remove $disk). See $console"
 
   log "VM $N is up:  ssh -i $FC_DIR/vm_key root@$CLONE_IP"
 }
@@ -272,7 +272,7 @@ cmd_verify() {
 
   echo " live (VM running)"
   if [[ -n $(ip netns pids "$NS" 2>/dev/null) ]]; then
-    check "guest agent /health"              out_has '"ok": true' curl -s --max-time 2 "http://$CLONE_IP:49983/health"
+    check "sandbox manager /health"              out_has '"ok": true' curl -s --max-time 2 "http://$CLONE_IP:49983/health"
     check "host can ping $CLONE_IP"          ping -c1 -W2 "$CLONE_IP"
     check "host can ssh to $CLONE_IP"        guest_ssh true
     check "guest has default via $TAP_IP"    out_has "via $TAP_IP " guest_ssh ip route show default

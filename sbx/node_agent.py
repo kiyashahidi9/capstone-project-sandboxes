@@ -1,3 +1,5 @@
+"""Host manager (node_agent.py): runs on the host and creates, pauses, resumes and deletes the sandboxes."""
+
 from __future__ import annotations
 
 import logging
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration
 #
-# Every path and number the node agent depends on is defined here, so nothing
+# Every path and number the host manager depends on is defined here, so nothing
 # is hidden inside a function. Paths can be overridden with environment
 # variables for testing.
 # ---------------------------------------------------------------------------
@@ -88,7 +90,7 @@ class Sandbox(BaseModel):
     n             3, the network slot (decides its namespace and IP)
     ip            "10.201.0.3", the address the host uses to reach the VM
     pid           Firecracker's process ID on the host
-    boot_seconds  time from starting Firecracker to the guest agent answering
+    boot_seconds  time from starting Firecracker to the sandbox manager (guest_agent/) answering
                   /health (write this in NOTES.md)
     """
 
@@ -436,17 +438,17 @@ def configure_and_boot_vm(sandbox_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# create_sandbox, step 10: wait for the guest agent
+# create_sandbox, step 10: wait for the sandbox manager
 # ---------------------------------------------------------------------------
 
 def guest_agent_url(sandbox_id: str, path: str) -> str:
-    """Return the full URL of a guest agent endpoint, e.g. http://10.201.0.3:49983/exec."""
+    """Return the full URL of a sandbox manager endpoint, e.g. http://10.201.0.3:49983/exec."""
     ip = guest_ip_for(require_slot(sandbox_id))
     return f"http://{ip}:{GUEST_AGENT_PORT}{path}"
 
 
 def guest_agent_is_healthy(sandbox_id: str) -> bool:
-    """Return True if the guest agent answers /health; a connection error means not yet."""
+    """Return True if the sandbox manager answers /health; a connection error means not yet."""
     try:
         response = httpx.get(guest_agent_url(sandbox_id, "/health"), timeout=1.0)
         return response.status_code == 200 and response.json().get("ok") is True
@@ -455,12 +457,12 @@ def guest_agent_is_healthy(sandbox_id: str) -> bool:
 
 
 def wait_for_guest_agent(sandbox_id: str) -> None:
-    """Wait (up to 30 s) until the guest agent inside the VM answers /health."""
+    """Wait (up to 30 s) until the sandbox manager inside the VM answers /health."""
     wait_until(
         lambda: guest_agent_is_healthy(sandbox_id),
         timeout=HEALTH_WAIT_TIMEOUT,
         interval=HEALTH_POLL_INTERVAL,
-        waiting_for=f"guest agent in {sandbox_id} to answer /health",
+        waiting_for=f"sandbox manager in {sandbox_id} to answer /health",
     )
 
 
@@ -740,7 +742,7 @@ def try_set_guest_clock(sandbox_id: str) -> bool:
     try:
         set_guest_clock(sandbox_id)
         return True
-    except httpx.HTTPError as error:   # e.g. a guest agent from before /clock answers 404
+    except httpx.HTTPError as error:   # e.g. a sandbox manager from before /clock answers 404
         logger.warning("could not set the clock in %s, it stays behind: %s", sandbox_id, error)
         return False
 
@@ -796,7 +798,7 @@ def list_host_sandboxes() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Talking to the guest agent: exec, read_file, write_file
+# Talking to the sandbox manager: exec, read_file, write_file
 # ---------------------------------------------------------------------------
 
 # Note: this name hides Python's built-in exec() in this module; kept because the plan and API use it.

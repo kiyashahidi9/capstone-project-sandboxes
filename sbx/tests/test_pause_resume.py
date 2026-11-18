@@ -36,7 +36,7 @@ def client(tmp_path, monkeypatch):
 
 @pytest.fixture
 def host(monkeypatch):
-    """Pretends to be the node agent's VM controls, recording every call."""
+    """Pretends to be the host manager's VM controls, recording every call."""
     fake = SimpleNamespace(
         calls=[], alive=True, healthy=True, snapshot=True,
         pause_error=None, resume_error=None, pause_gate=None,

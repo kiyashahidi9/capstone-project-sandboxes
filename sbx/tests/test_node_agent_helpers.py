@@ -394,7 +394,7 @@ def test_resume_kills_firecracker_and_keeps_the_snapshot_if_a_step_fails(fake_sa
 # --- guest disk sync and clock (4b full) ---------------------------------------
 
 class FakeGuestAgent:
-    """Stands in for the guest agent's HTTP API, remembering every POST and answering with a set status."""
+    """Stands in for the sandbox manager's HTTP API, remembering every POST and answering with a set status."""
 
     def __init__(self, status_code=200):
         self.status_code = status_code
@@ -408,7 +408,7 @@ class FakeGuestAgent:
 
 @pytest.fixture
 def fake_guest(monkeypatch):
-    """Send the node agent's guest agent calls to a fake instead of a real VM."""
+    """Send the host manager's calls to the sandbox manager (guest_agent/) to a fake instead of a real VM."""
     guest = FakeGuestAgent()
     monkeypatch.setattr(node_agent.httpx, "post", guest.post)
     monkeypatch.setattr(node_agent, "guest_agent_url", lambda sandbox_id, path: f"http://guest{path}")
@@ -454,7 +454,7 @@ def test_resume_sets_the_clock_after_the_guest_answers(resumable, fake_guest):
 
 
 def test_resume_still_succeeds_if_the_clock_cannot_be_set(resumable, fake_guest, monkeypatch):
-    """A guest agent from before /clock answers 404; the sandbox must still come back."""
+    """A sandbox manager from before /clock answers 404; the sandbox must still come back."""
     killed = []
     monkeypatch.setattr(node_agent, "kill_firecracker", killed.append)
     fake_guest.status_code = 404
