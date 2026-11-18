@@ -18,14 +18,16 @@ import threading
 from dataclasses import dataclass, field
 
 import locks
+import node_agent
 from api import auth, db
-from api.models import EventType, SandboxState, TurnState
+from api.models import EventType, FailureCause, SandboxState, TurnState
 
 
 ## CONFIG ##
 
 DEFAULT_TURN_TIMEOUT = 1800       # seconds; override with AGENT_TURN_TIMEOUT in .env
 STDERR_LINES_KEPT = 50            # how much of stderr a failed turn saves
+MAX_TEXT_CHARS = 64_000          # longer text in an event is cut, so one huge output can't bloat state.db
 AGENT_SANDBOX_API = "http://127.0.0.1:8000"   # where the agent reaches the API, given as SANDBOX_API
 AI_KEY_NAMES = ("OPENAI_API_KEY",)            # the only secrets from .env the agent gets
 
@@ -332,16 +334,28 @@ def record_line(sandbox_id: str, line: str) -> None:
         parsed = None
 
     if isinstance(parsed, dict) and parsed.get("type") == "question":
-        db.append_event(sandbox_id, EventType.QUESTION, {"text": str(parsed.get("text", ""))})
+        db.append_event(sandbox_id, EventType.QUESTION, {"text": capped(str(parsed.get("text", "")))})
         return
 
     step: EventType | None = RECORDED_STEPS.get(parsed.get("type")) if isinstance(parsed, dict) else None
     if isinstance(parsed, dict) and step is not None:
         data: dict = {key: value for key, value in parsed.items() if key != "type"}
-        db.append_event(sandbox_id, step, data)
+        db.append_event(sandbox_id, step, capped(data))
         return
 
-    db.append_event(sandbox_id, EventType.AGENT_OUTPUT, {"text": line})
+    db.append_event(sandbox_id, EventType.AGENT_OUTPUT, {"text": capped(line)})
+
+
+def capped(value):
+    """Cuts every string longer than MAX_TEXT_CHARS, inside dicts and lists too, and says how much was cut."""
+    if isinstance(value, str) and len(value) > MAX_TEXT_CHARS:
+        cut = len(value) - MAX_TEXT_CHARS
+        return value[:MAX_TEXT_CHARS] + f"\n[truncated {cut} characters]"
+    if isinstance(value, dict):
+        return {key: capped(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [capped(item) for item in value]
+    return value
 
 
 def record_end(sandbox_id: str, turn: Turn, exit_code: int, stderr_tail: str) -> None:
@@ -359,8 +373,25 @@ def record_end(sandbox_id: str, turn: Turn, exit_code: int, stderr_tail: str) ->
     db.append_event(
         sandbox_id,
         EventType.TURN_FAILED,
-        {"reason": reason, "exit_code": exit_code, "stderr_tail": stderr_tail},
+        {"reason": reason, "cause": failure_cause(sandbox_id, reason), "exit_code": exit_code, "stderr_tail": stderr_tail},
     )
+
+
+def failure_cause(sandbox_id: str, reason: str) -> FailureCause:
+    """
+    Whose fault a failed turn was (docs/observability.md)
+    paused: a user or auto-pause stopped it
+    otherwise, checks the VM: still answering means the agent failed, not answering means the sandbox did
+    """
+    if reason == "paused":
+        return FailureCause.PAUSED
+
+    try:
+        vm_answers = node_agent.is_sandbox_running(sandbox_id) and node_agent.guest_agent_is_healthy(sandbox_id)
+    except Exception:
+        return FailureCause.UNKNOWN
+
+    return FailureCause.AGENT if vm_answers else FailureCause.SANDBOX
 
 
 ## STOPPING ##

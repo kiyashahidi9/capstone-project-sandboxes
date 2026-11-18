@@ -162,8 +162,15 @@ def test_two_lines_then_exit_zero_finishes_the_turn(tmp_path, monkeypatch):
     assert_turn_over()
 
 
+def fake_vm(monkeypatch, answers: bool) -> None:
+    """Makes the runner's VM check see a healthy VM, or a dead one."""
+    monkeypatch.setattr(runner.node_agent, "is_sandbox_running", lambda sandbox_id: answers)
+    monkeypatch.setattr(runner.node_agent, "guest_agent_is_healthy", lambda sandbox_id: answers)
+
+
 def test_exit_one_fails_the_turn_with_the_end_of_stderr(tmp_path, monkeypatch):
     use_agent(tmp_path, monkeypatch, FAILS)
+    fake_vm(monkeypatch, answers=True)
     send()
 
     runner.run_turn(SANDBOX_ID)
@@ -171,8 +178,46 @@ def test_exit_one_fails_the_turn_with_the_end_of_stderr(tmp_path, monkeypatch):
     *_, output, (last_type, last_data) = events()
     assert output == (EventType.AGENT_OUTPUT, {"text": "working on it"})
     assert last_type == EventType.TURN_FAILED
-    assert last_data == {"reason": "exit", "exit_code": 1, "stderr_tail": "something broke"}
+    assert last_data == {"reason": "exit", "cause": "agent", "exit_code": 1, "stderr_tail": "something broke"}
     assert_turn_over()
+
+
+def test_a_failed_turn_on_a_dead_vm_blames_the_sandbox(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, FAILS)
+    fake_vm(monkeypatch, answers=False)
+    send()
+
+    runner.run_turn(SANDBOX_ID)
+
+    *_, (last_type, last_data) = events()
+    assert last_type == EventType.TURN_FAILED
+    assert last_data["cause"] == "sandbox"
+
+
+def test_a_vm_check_that_breaks_gives_an_unknown_cause(monkeypatch):
+    def broken(sandbox_id):
+        raise RuntimeError("no pid file")
+
+    monkeypatch.setattr(runner.node_agent, "is_sandbox_running", broken)
+
+    assert runner.failure_cause(SANDBOX_ID, "exit") == "unknown"
+    assert runner.failure_cause(SANDBOX_ID, "paused") == "paused"
+
+
+def test_very_long_text_in_an_event_is_cut(tmp_path, monkeypatch):
+    long_text = "x" * (runner.MAX_TEXT_CHARS + 10)
+    use_agent(tmp_path, monkeypatch, f"""
+import json
+print("{long_text}")
+print(json.dumps({{"type": "tool_completed", "tool_call_id": "c1", "result": {{"stdout": "{long_text}"}}}}))
+""")
+    send()
+
+    runner.run_turn(SANDBOX_ID)
+
+    cut = "x" * runner.MAX_TEXT_CHARS + "\n[truncated 10 characters]"
+    assert (EventType.AGENT_OUTPUT, {"text": cut}) in events()
+    assert (EventType.TOOL_COMPLETED, {"tool_call_id": "c1", "result": {"stdout": cut}}) in events()
 
 
 def test_a_step_line_is_stored_as_its_own_event(tmp_path, monkeypatch):

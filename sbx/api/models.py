@@ -191,3 +191,52 @@ class EventListResponse(BaseModel):
     """The events a client hasn't seen yet, oldest first."""
 
     events: list[Event]
+
+
+# ---------------------------------------------------------------------------
+# Observability: one summary per turn (docs/observability.md)
+# ---------------------------------------------------------------------------
+
+class TurnStatus(StrEnum):
+    """How a turn went, worked out from its events."""
+
+    RUNNING = "running"             # the agent is still working and recently recorded something
+    UNRESPONSIVE = "unresponsive"   # still working, but nothing recorded for a while
+    FINISHED = "finished"           # turn_finished
+    FAILED = "failed"               # turn_failed for any reason but a pause
+    PAUSED = "paused"               # a pause cut the turn off; not a failure
+    INCOMPLETE = "incomplete"       # no end recorded and the agent isn't working; shouldn't happen
+
+
+class FailureCause(StrEnum):
+    """Whose fault a failed turn was."""
+
+    AGENT = "agent"                 # the VM was healthy, so the agent itself crashed or hung
+    SANDBOX = "sandbox"             # the VM or the program inside it stopped answering
+    HOST = "host"                   # our side: server restart, missing AGENT_CMD, runner error
+    PAUSED = "paused"               # a user or auto-pause stopped it
+    UNKNOWN = "unknown"             # the VM check itself failed
+
+
+class TurnSummary(BaseModel):
+    """One turn (one user message and everything done for it), for investigating failures."""
+
+    turn: int                       # 1, 2, 3, ... per sandbox, in message order
+    status: TurnStatus
+    reason: str | None = None       # from turn_failed: exit, timeout, paused, server restarted, ...
+    cause: FailureCause | None = None
+    exit_code: int | None = None
+    stderr_tail: str | None = None  # the agent's last 50 lines of stderr, when it failed
+    started_at: int                 # unix seconds, when the user's message arrived
+    ended_at: int | None = None     # unix seconds; None while running
+    first_seq: int                  # the turn's events are first_seq..last_seq
+    last_seq: int
+    seconds_since_last_event: int
+    last_action: Event | None = None      # the last step or output before the turn ended
+    unfinished_step: Event | None = None  # a tool_started or llm_request that never got its answer
+
+
+class TurnListResponse(BaseModel):
+    """Every turn of one sandbox, oldest first."""
+
+    turns: list[TurnSummary]

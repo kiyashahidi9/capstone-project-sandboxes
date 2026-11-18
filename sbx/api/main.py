@@ -5,16 +5,17 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 
 import node_agent
-from api import db
+from api import db, observability
 from api.auth import require_admin, require_admin_key_set, require_admin_or_turn
 from api.helpers import (
     HTTP_ACCEPTED,
     HTTP_CREATED,
+    HTTP_NOT_FOUND,
     boot_sandbox,
     build_create_response,
     destroy,
@@ -44,6 +45,8 @@ from api.models import (
     SandboxInfo,
     SandboxListResponse,
     SandboxState,
+    TurnListResponse,
+    TurnState,
 )
 from control.live import SampleMemory
 from control.heartbeat import run_until_stopped
@@ -202,7 +205,33 @@ def send_message(sandbox_id: str, request: MessageRequest) -> MessageResponse:
 
 
 @app.get("/sandboxes/{sandbox_id}/events", response_model=EventListResponse, dependencies=[ADMIN_ONLY])
-def list_events(sandbox_id: str, after: int = Query(default=0, ge=0)) -> EventListResponse:
-    """Shows every event after seq `after`, oldest first; works for destroyed sandboxes too."""
+def list_events(
+        sandbox_id: str,
+        after: int = Query(default=0, ge=0),
+        turn: int | None = Query(default=None, ge=1),
+        ) -> EventListResponse:
+    """
+    Shows every event after seq `after`, oldest first; works for destroyed sandboxes too
+    with `turn`, only that turn's events (turns count from 1); 404 if there is no such turn
+    """
     require_sandbox(sandbox_id)
-    return EventListResponse(events=db.list_events(sandbox_id, after))
+    if turn is None:
+        return EventListResponse(events=db.list_events(sandbox_id, after))
+
+    events = observability.events_in_turn(db.list_events(sandbox_id), turn)
+    if events is None:
+        raise HTTPException(status_code=HTTP_NOT_FOUND, detail="Turn not found")
+    return EventListResponse(events=[event for event in events if event.seq > after])
+
+
+# ---------------------------------------------------------------------------
+# Endpoints: observability (docs/observability.md)
+# ---------------------------------------------------------------------------
+
+@app.get("/sandboxes/{sandbox_id}/turns", response_model=TurnListResponse, dependencies=[ADMIN_ONLY])
+def list_turns(sandbox_id: str) -> TurnListResponse:
+    """Sums up every turn, oldest first: its status, why it failed, and the agent's last action."""
+    row = require_sandbox(sandbox_id)
+    working = row.turn_state == TurnState.WORKING
+    turns = observability.summarize_turns(db.list_events(sandbox_id), working, db.now())
+    return TurnListResponse(turns=turns)

@@ -40,7 +40,8 @@ To rebuild the conversation, use the `user_message` events (what the user said) 
 
 - **stdout:** each line becomes an `agent_output` event, `{"text": "<the line>"}`.
 - **A question:** print one JSON line `{"type": "question", "text": "..."}`, then exit 0. The user's answer comes back as the next message, with this turn in the history. Only a valid JSON object with `"type": "question"` counts. Any other line is plain output.
-- **stderr:** never shown to the user. Use it for debug logs. If the turn fails, its last 50 lines are saved in the `turn_failed` event.
+- **stderr:** never shown to the user. Use it for debug logs. If the turn fails, its last 50 lines are saved in the `turn_failed` event, along with a `cause` (`agent` or `sandbox`, see [observability.md](observability.md)).
+- **Long text:** any string over 64,000 characters in a line or step is cut when stored.
 
 ## Steps
 

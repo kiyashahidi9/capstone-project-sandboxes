@@ -12,6 +12,31 @@ export type Sandbox = {
   paused_at: number | null; // unix seconds; null unless paused
 };
 
+// one entry in a sandbox's event log; data depends on type (see docs/agent_contract.md)
+export type SandboxEvent = {
+  seq: number;
+  type: string;
+  data: Record<string, unknown>;
+  at: number;               // unix seconds
+};
+
+export type TurnStatus = "running" | "unresponsive" | "finished" | "failed" | "paused" | "incomplete";
+
+// same fields as the API's TurnSummary (docs/observability.md)
+export type TurnSummary = {
+  turn: number;
+  status: TurnStatus;
+  reason: string | null;
+  cause: "agent" | "sandbox" | "host" | "paused" | "unknown" | null;
+  exit_code: number | null;
+  stderr_tail: string | null;
+  started_at: number;
+  ended_at: number | null;
+  seconds_since_last_event: number;
+  last_action: SandboxEvent | null;
+  unfinished_step: SandboxEvent | null;
+};
+
 
 // ## REQUESTS ##
 
@@ -28,7 +53,11 @@ async function request<T>(path: string, method = "GET"): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     const detail = body?.detail ?? "Could not reach the API server. Is it running, and is the SSH tunnel open?";
-    const hint = response.status === 401 ? ". Check SANDBOX_ADMIN_KEY in the repo-root .env, then restart npm run dev" : "";
+    // FastAPI says just "Not Found" when the route itself doesn't exist, i.e. the server runs older code
+    const hint =
+      response.status === 401 ? ". Check SANDBOX_ADMIN_KEY in the repo-root .env, then restart npm run dev"
+      : detail === "Not Found" ? ". The API server doesn't have this endpoint: pull the latest code on the host and restart it"
+      : "";
     throw new Error(`Request failed (${response.status}): ${detail}${hint}`);
   }
   return response.json();
@@ -37,10 +66,21 @@ async function request<T>(path: string, method = "GET"): Promise<T> {
 
 // ## API ##
 
-// destroyed sandboxes stay in the API's database, so hide them here
-export async function listSandboxes(): Promise<Sandbox[]> {
+// destroyed sandboxes stay in the API's database (with their history); hidden unless asked for
+export async function listSandboxes(includeDestroyed = false): Promise<Sandbox[]> {
   const body = await request<{ sandboxes: Sandbox[] }>("/sandboxes");
-  return body.sandboxes.filter((s) => s.state !== "destroyed");
+  return body.sandboxes.filter((s) => includeDestroyed || s.state !== "destroyed");
+}
+
+export async function listTurns(id: string): Promise<TurnSummary[]> {
+  const body = await request<{ turns: TurnSummary[] }>(`/sandboxes/${id}/turns`);
+  return body.turns;
+}
+
+// one turn's events with seq greater than after
+export async function listEvents(id: string, turn: number, after = 0): Promise<SandboxEvent[]> {
+  const body = await request<{ events: SandboxEvent[] }>(`/sandboxes/${id}/events?turn=${turn}&after=${after}`);
+  return body.events;
 }
 
 // saves the VM to disk and frees its memory; cuts off the agent's turn if one is running

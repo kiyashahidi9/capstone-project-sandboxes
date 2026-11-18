@@ -77,13 +77,35 @@ def history_to_messages(events: list[dict]) -> list[dict]:
     return messages
 
 
+## STEPS (docs/agent_contract.md, read by docs/observability.md) ##
+
+def step(kind: str, **data) -> None:
+    """Prints one step as a JSON line; the runner stores it as its own event, and the chat doesn't show it."""
+    print(json.dumps({"type": kind, **data}, default=str))
+
+
+def as_dict(message) -> dict:
+    """A chat message as plain data: ours are dicts already, the model's replies are objects."""
+    if isinstance(message, dict):
+        return message
+    return message.model_dump(exclude_none=True)
+
+
+def parse_arguments(text: str):
+    """The model's tool arguments as data, or the raw text if they aren't valid JSON."""
+    try:
+        return json.loads(text)
+    except ValueError:
+        return text
+
+
 ## TOOL RUNNER ##
 
-def run_tool(sandbox: Sandbox, name: str, args: dict) -> str:
+def run_tool(sandbox: Sandbox, name: str, args: dict) -> tuple[str, object]:
     """
     Runs one tool call from the model in the sandbox
     prints what it's doing
-    returns the result as text for the model
+    returns the result as text for the model, and the result to record in tool_completed
     """
     if name == "run_command":
         background = args.get("background", False)
@@ -95,17 +117,18 @@ def run_tool(sandbox: Sandbox, name: str, args: dict) -> str:
         for line in output.splitlines()[:5]:
             print(f"      {line}")
 
-        return json.dumps(result)
+        return json.dumps(result), result
 
     path = absolute_path(args["path"])
 
     if name == "read_file":
         print(f"[read] {path}")
-        return sandbox.read_file(path)
+        content = sandbox.read_file(path)
+        return content, content
 
     print(f"[write] {path}")
     sandbox.write_file(path, args["content"])
-    return "ok"
+    return "ok", {"path": path, "content": args["content"]}
 
 
 def absolute_path(path: str) -> str:
@@ -137,6 +160,8 @@ def main() -> int:
     messages.append({"role": "user", "content": task})
 
     for _ in range(MAX_STEPS):
+        # record the request before sending it, so a hang or crash in the call shows as unfinished
+        step("llm_request", model=MODEL, system=SYSTEM_PROMPT, tools=TOOLS, messages=[as_dict(m) for m in messages[1:]])
         response = client.chat.completions.create(
             model=MODEL,
             messages=messages,
@@ -146,15 +171,28 @@ def main() -> int:
         messages.append(message)
 
         if not message.tool_calls:
-            print(message.content or "")
+            step("llm_response", text=message.content or "")
+            print(message.content or "")    # plain text too, so the chat shows the answer
             return EXIT_FINISHED
 
-        for call in message.tool_calls:
+        calls = [
+            {"tool_call_id": call.id, "name": call.function.name, "arguments": parse_arguments(call.function.arguments)}
+            for call in message.tool_calls
+        ]
+        if message.content:
+            step("llm_response", text=message.content, tool_calls=calls)
+        else:
+            step("llm_response", tool_calls=calls)
+
+        for call, recorded in zip(message.tool_calls, calls):
+            step("tool_started", **recorded)
             try:
                 args = json.loads(call.function.arguments)
-                output = run_tool(sandbox, call.function.name, args)
+                output, result = run_tool(sandbox, call.function.name, args)
             except Exception as e:
                 output = f"error: {e}"
+                result = output
+            step("tool_completed", tool_call_id=call.id, result=result)
 
             messages.append({
                 "role": "tool",

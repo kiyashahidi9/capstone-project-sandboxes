@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { deleteSandbox, listSandboxes, pauseSandbox, resumeSandbox, type Sandbox } from "./api";
+import SandboxDetail from "./SandboxDetail";
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -16,20 +17,27 @@ export default function App() {
   const [busy, setBusy] = useState<Busy | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [showDestroyed, setShowDestroyed] = useState(false);   // destroyed sandboxes keep their history
+  const [openId, setOpenId] = useState<string | null>(null);   // the sandbox whose turns are shown
 
   // load the list on page open, then reload it every few seconds (this also catches auto-pauses)
   useEffect(() => {
+    let stopped = false;    // ignore answers that arrive after the checkbox changed
+
     function load() {
-      listSandboxes()
-        .then(setSandboxes)
-        .catch((e) => setError(e.message))
-        .finally(() => setLoading(false));
+      listSandboxes(showDestroyed)
+        .then((list) => !stopped && setSandboxes(list))
+        .catch((e) => !stopped && setError(e.message))
+        .finally(() => !stopped && setLoading(false));
     }
 
     load();
     const timer = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, []);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [showDestroyed]);
 
 
   // ## ACTIONS ##
@@ -71,9 +79,19 @@ export default function App() {
 
   // ## PAGE ##
 
+  if (openId) {
+    return <SandboxDetail sandboxId={openId} onBack={() => setOpenId(null)} />;
+  }
+
   return (
     <main>
-      <h1>Sandboxes</h1>
+      <header>
+        <h1>Sandboxes</h1>
+        <label className="muted">
+          <input type="checkbox" checked={showDestroyed} onChange={(e) => setShowDestroyed(e.target.checked)} />
+          Show destroyed
+        </label>
+      </header>
 
       {error && (
         <div className="error">
@@ -100,7 +118,11 @@ export default function App() {
           <tbody>
             {sandboxes.map((s) => (
               <tr key={s.id}>
-                <td className="id">{s.id}</td>
+                <td className="id">
+                  <button className="link" onClick={() => setOpenId(s.id)} title="Show its turns and timeline">
+                    {s.id}
+                  </button>
+                </td>
                 <td>
                   <span className={`badge ${s.state}`}>{s.state}</span>
                   {s.paused_at && <div className="muted">since {formatTime(s.paused_at)}</div>}
@@ -120,9 +142,11 @@ export default function App() {
                         </button>
                       )}
                       {s.state === "paused" && <button onClick={() => resume(s.id)}>Resume</button>}
-                      <button className="danger" onClick={() => setConfirmDeleteId(s.id)}>
-                        Delete
-                      </button>
+                      {s.state !== "destroyed" && (
+                        <button className="danger" onClick={() => setConfirmDeleteId(s.id)}>
+                          Delete
+                        </button>
+                      )}
                     </>
                   )}
                 </td>

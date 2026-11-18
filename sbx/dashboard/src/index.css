@@ -102,3 +102,53 @@ button.danger:hover { background: #ffebe9; }
   justify-content: flex-end;
   gap: 8px;
 }
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* ## OBSERVABILITY ## */
+
+.badge.finished    { background: #dafbe1; color: #116329; }
+.badge.failed      { background: #ffebe9; color: #82071e; }
+.badge.unresponsive { background: #fff1e5; color: #953800; }
+.badge.incomplete, .badge.destroyed { background: #eaeef2; color: #57606a; }
+
+button.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #0969da;
+  font: inherit;
+  text-align: left;
+}
+button.link:hover { background: none; text-decoration: underline; }
+
+tr.clickable { cursor: pointer; }
+tr.clickable:hover { background: #f6f8fa; }
+tr.chosen { background: #ddf4ff; }
+
+.timeline td { vertical-align: top; font-size: 13px; }
+.timeline td:first-child { white-space: nowrap; }
+
+pre {
+  max-height: 400px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f6f8fa;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.failure {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid #cf222e;
+  border-radius: 6px;
+  background: #fff8f8;
+}
+.failure div { margin-top: 4px; font-size: 13px; }
