@@ -1,8 +1,9 @@
-# Ignore everything at the top level except sbx, .githooks, and this file
+# Ignore everything at the top level except sbx, .githooks, .env.example, and this file
 /*
 !/sbx/
 !/.gitignore
 !/.githooks/
+!/.env.example
 
 # Local SQLite databases (e.g. dev-state.db built from sbx/db/seed.sql)
 *.db
