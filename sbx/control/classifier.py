@@ -26,7 +26,6 @@ REASONS: dict[EventType, str] = {
 
 def classify(window: ObservationWindow) -> tuple[Activity, str]:
     """Return the activity of this window and a short reason."""
-    # Sample: (Activity.WAITING, "the agent is waiting for the user")
     events: list[AgentEvent] = list[AgentEvent](window.events)
     if not events:
         return Activity.UNKNOWN, "no agent events"

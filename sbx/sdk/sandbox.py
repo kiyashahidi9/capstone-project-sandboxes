@@ -61,7 +61,6 @@ def _call_api(
     res = httpx.request(method, url, timeout=timeout, **kwargs)
     
     if res.is_error:
-        # use the API's {"detail": "..."} message; fall back to the raw text if it isn't JSON
         try:
             detail = res.json().get("detail", res.text)
         except ValueError:
@@ -138,7 +137,7 @@ class Sandbox:
             raise RuntimeError("SANDBOX_ID is not set")
 
         api = os.environ.get("SANDBOX_API", DEFAULT_API)
-        token = os.environ.get("SANDBOX_TOKEN") or None   # an empty value means no token
+        token = os.environ.get("SANDBOX_TOKEN") or None
 
         return cls(sandbox_id, api, token)
 

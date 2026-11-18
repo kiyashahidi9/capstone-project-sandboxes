@@ -36,5 +36,5 @@ def test_threads_asking_at_once_all_get_one_lock():
 
 def test_stop_turn_with_no_turn_running_returns_without_taking_the_lock():
     lock = locks.lock_for(ID_A)
-    with lock:   # held: a stop_turn that waited for it would hang this test
+    with lock:
         runner.stop_turn(ID_A)

@@ -6,8 +6,6 @@ prints PASS or FAIL per check; exits 0 only if all pass
 standard library only, so it runs on any Python
 """
 
-## IMPORTS ##
-
 import os
 import pwd
 import sys
@@ -46,9 +44,9 @@ def reaches_metadata_server() -> bool:
         urllib.request.urlopen(request, timeout=3)
         return True
     except urllib.error.HTTPError:
-        return True    # it answered, even if with an error
+        return True
     except OSError:
-        return False   # blocked
+        return False
 
 
 def can_read(path: str) -> bool:
@@ -67,7 +65,6 @@ def main() -> int:
     run_true = b'{"cmd": "true"}'
 
     checks = [
-        # (what the spec says must happen, did it)
         ("its own token works on its own sandbox (exec -> 200)", call("POST", f"/sandboxes/{OWN_ID}/exec", body=run_true) == 200),
         ("exec on another sandbox with its token -> 403", call("POST", f"/sandboxes/{other_id}/exec", body=run_true) == 403),
         ("DELETE its own sandbox -> 403", call("DELETE", f"/sandboxes/{OWN_ID}") == 403),

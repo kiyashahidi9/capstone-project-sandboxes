@@ -157,8 +157,8 @@ def test_message_to_a_paused_sandbox_resumes_it_then_starts_the_turn(client, hos
     while not started:
         assert time.monotonic() < deadline, "the turn never started"
         time.sleep(0.01)
-    assert started == [(ID, SandboxState.RUNNING)]   # running before the agent starts
-    assert not locks.lock_for(ID).locked()           # the resume let the lock go for the runner
+    assert started == [(ID, SandboxState.RUNNING)]
+    assert not locks.lock_for(ID).locked()
 
 
 def test_message_whose_resume_fails_starts_no_turn(client, host, monkeypatch):
@@ -222,12 +222,12 @@ def test_pause_cuts_off_a_new_turn_that_took_the_lock_first(host, client, monkey
     make_sandbox(SandboxState.RUNNING)
     monkeypatch.setattr(helpers, "LOCK_RETRY_SECONDS", 0.01)
     turn_lock = locks.lock_for(ID)
-    turn_lock.acquire()               # a turn that started right after the first stop_turn
+    turn_lock.acquire()
     stops = []
 
     def stop_turn(sandbox_id):
         stops.append(sandbox_id)
-        if len(stops) == 2:           # the retry cuts the new turn off, which frees the lock
+        if len(stops) == 2:
             turn_lock.release()
 
     monkeypatch.setattr(runner, "stop_turn", stop_turn)
@@ -265,7 +265,7 @@ def test_failed_pause_with_the_vm_still_up_goes_back_to_running(client, host):
 def test_failed_pause_after_a_full_snapshot_counts_as_paused(client, host):
     make_sandbox(SandboxState.RUNNING)
     host.pause_error = RuntimeError("kill step failed")
-    host.alive = False                # the VM is already gone, but its snapshot is complete
+    host.alive = False
 
     response = client.post(f"/sandboxes/{ID}/pause")
 
@@ -333,7 +333,7 @@ def test_file_calls_on_a_paused_sandbox_resume_it_first(client, host, monkeypatc
 def test_exec_on_a_running_sandbox_does_not_wait_for_the_lock(client, host):
     make_sandbox(SandboxState.RUNNING)
 
-    with locks.lock_for(ID):          # the agent's turn holds it while the agent calls exec
+    with locks.lock_for(ID):
         outcome = run_in_thread(helpers.ensure_running, ID)
         assert finishes(outcome)
 
@@ -434,7 +434,7 @@ def test_startup_settles_a_pause_cut_off_after_a_full_snapshot(host):
 
 def test_startup_stops_a_stuck_vm_and_uses_its_snapshot(host):
     make_sandbox(SandboxState.PAUSING)
-    host.healthy = False              # frozen for good: alive but not answering
+    host.healthy = False
 
     helpers.recover_interrupted_changes()
 
@@ -472,7 +472,7 @@ def test_startup_settles_a_half_done_resume_as_paused(host):
 
 def test_server_start_runs_the_recovery(tmp_path, monkeypatch, host):
     monkeypatch.setenv("SBX_DB", str(tmp_path / "state.db"))
-    monkeypatch.setenv("SANDBOX_ADMIN_KEY", ADMIN_KEY)   # the server won't start without it
+    monkeypatch.setenv("SANDBOX_ADMIN_KEY", ADMIN_KEY)
     db.create_tables()
     make_sandbox(SandboxState.RESUMING)
 

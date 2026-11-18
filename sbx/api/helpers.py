@@ -75,9 +75,9 @@ def require_state_in(row: SandboxRow, states: tuple[SandboxState, ...], detail: 
 def lock_taken_from_agent(sandbox_id: str) -> Iterator[None]:
     """Holds the sandbox's lock for a block of code, cutting off the agent's turn to get it."""
     lock = locks.lock_for(sandbox_id)
-    runner.stop_turn(sandbox_id)       # before waiting: a turn holds the lock until it ends
+    runner.stop_turn(sandbox_id)
     while not lock.acquire(timeout=LOCK_RETRY_SECONDS):
-        runner.stop_turn(sandbox_id)   # a new turn took the lock first; cut that one off too
+        runner.stop_turn(sandbox_id)
     try:
         yield
     finally:
@@ -143,7 +143,7 @@ def destroy(sandbox_id: str) -> None:
     if is_destroyed(require_sandbox(sandbox_id)):
         return
     with lock_taken_from_agent(sandbox_id):
-        if not is_destroyed(require_sandbox(sandbox_id)):   # another delete may have won while we waited
+        if not is_destroyed(require_sandbox(sandbox_id)):
             tear_down(sandbox_id)
 
 
@@ -195,9 +195,9 @@ def ensure_running(sandbox_id: str) -> None:
     """Gets a sandbox ready for a command, resuming it first if it's paused; answers 404 or 409 if it can't."""
     row = require_sandbox(sandbox_id)
     if row.state == SandboxState.RUNNING:
-        return   # no lock: the agent's own turn holds it while it calls exec
+        return
     require_state_in(row, WAIT_FOR_LOCK_STATES, NOT_RUNNING)
-    with locks.lock_for(sandbox_id):   # waits for a pause or resume already under way
+    with locks.lock_for(sandbox_id):
         resume_if_paused(sandbox_id)
 
 
@@ -252,21 +252,21 @@ def try_unfreeze(sandbox_id: str) -> None:
         with node_agent.firecracker_client(sandbox_id) as client:
             node_agent.unfreeze_vm(client)
     except Exception:
-        pass   # not frozen, or Firecracker is gone: vm_answers() decides what happens next
+        pass
 
 
 def settle_pausing(sandbox_id: str) -> None:
     """Records where an unfinished pause really left a sandbox: running, paused, or gone."""
     if node_agent.is_sandbox_running(sandbox_id):
-        try_unfreeze(sandbox_id)       # a pause can stop between freezing the VM and saving it
+        try_unfreeze(sandbox_id)
         if vm_answers(sandbox_id):
             db.transition(sandbox_id, [SandboxState.PAUSING], SandboxState.RUNNING)
             return
-        node_agent.kill_firecracker(sandbox_id)   # alive but stuck: let the snapshot decide
+        node_agent.kill_firecracker(sandbox_id)
     if snapshot_is_complete(sandbox_id):
         mark_paused(sandbox_id)
         return
-    tear_down(sandbox_id)              # no VM and no usable snapshot: nothing left to bring back
+    tear_down(sandbox_id)
 
 
 def settle_resuming(sandbox_id: str) -> None:
@@ -274,7 +274,7 @@ def settle_resuming(sandbox_id: str) -> None:
     if vm_answers(sandbox_id):
         mark_resumed(sandbox_id)
         return
-    node_agent.kill_firecracker(sandbox_id)   # half-loaded VM; snap/ stays, so a later resume can retry
+    node_agent.kill_firecracker(sandbox_id)
     db.transition(sandbox_id, [SandboxState.RESUMING], SandboxState.PAUSED)
 
 

@@ -6,8 +6,6 @@ run from sbx/:
     uv run python -m client.client
 """
 
-## IMPORTS ##
-
 import os
 import sys
 import time
@@ -44,7 +42,6 @@ def show_event(event: dict) -> bool:
     elif kind == "turn_failed":
         print(f"error: {data.get('reason', 'unknown')}")
 
-        # the end of the agent's stderr, if it ran
         stderr_lines = data.get("stderr_tail", "").splitlines()
         for line in stderr_lines[-STDERR_LINES_SHOWN:]:
             print(f"      {line}")
@@ -53,7 +50,6 @@ def show_event(event: dict) -> bool:
     elif kind in ("paused", "resumed"):
         print(f"[{kind}]")
 
-    # user_message and turn_started: nothing to show
     return False
 
 
@@ -86,7 +82,7 @@ def main() -> None:
     sandbox = Sandbox.create(token=admin_key)
     print(f"sandbox {sandbox.id} ready")
 
-    last_seq = 0   # the newest event already shown
+    last_seq = 0
 
     try:
         while (text := input("> ").strip()) != "/quit":
@@ -102,10 +98,9 @@ def main() -> None:
             last_seq = wait_for_turn(sandbox, last_seq)
 
     except (KeyboardInterrupt, EOFError):
-        print()   # Ctrl+C or Ctrl+D: end the line and clean up
+        print()
 
     finally:
-        # always clean up, even on Ctrl+C or a crash; this also stops a running turn
         sandbox.destroy()
         print(f"sandbox {sandbox.id} destroyed")
 

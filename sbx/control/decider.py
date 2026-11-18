@@ -19,8 +19,6 @@ PAUSABLE: set[Activity] = {Activity.WAITING, Activity.IDLE}
 
 def decide(activity: Activity, window: ObservationWindow, policy: Policy) -> tuple[Decision, str]:
     """Return the sandbox's next state for this agent activity and window, and a short reason."""
-    # Sample: (Decision.PAUSE, "waiting and quiet for 30 seconds")
-    # earliest time stamp to latest is end 
     samples: list[VmSample] = sorted(window.samples, key=lambda sample: sample.timestamp)
     paused_at: AwareDatetime | None = _pause_started_at(samples)
     if paused_at is not None and _has_request_after(window.events, paused_at):

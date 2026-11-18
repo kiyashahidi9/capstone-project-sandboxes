@@ -18,7 +18,7 @@ def test_new_ids_are_valid_and_unique():
     ids = {node_agent.new_sandbox_id() for _ in range(1000)}
     assert len(ids) == 1000
     for sandbox_id in ids:
-        node_agent.validate_sandbox_id(sandbox_id)   # does not raise
+        node_agent.validate_sandbox_id(sandbox_id)
 
 
 def test_names_built_from_slot_number():
@@ -41,7 +41,7 @@ def test_validate_rejects_bad_ids(bad_id):
 @pytest.fixture
 def fake_sandboxes_root(tmp_path, monkeypatch):
     """Point SANDBOXES_ROOT (and so the state database) at a temporary folder instead of /var/sbx."""
-    root = str(tmp_path)          # pytest gives a Path; we use plain strings
+    root = str(tmp_path)
     monkeypatch.setattr(node_agent, "SANDBOXES_ROOT", root)
     return root
 
@@ -70,7 +70,7 @@ def test_raises_when_all_slots_taken(fake_sandboxes_root, monkeypatch):
 
 def test_a_sandbox_cannot_hold_two_slots(fake_sandboxes_root):
     node_agent.claim_free_slot(ID_A)
-    with pytest.raises(sqlite3.IntegrityError):        # sandbox_id is UNIQUE
+    with pytest.raises(sqlite3.IntegrityError):
         insert_slot(5, ID_A)
 
 
@@ -81,7 +81,7 @@ def test_concurrent_claims_never_share_a_slot(fake_sandboxes_root):
     results = {}
 
     def claim(sandbox_id):
-        start.wait()                                   # release all threads at once
+        start.wait()
         results[sandbox_id] = node_agent.claim_free_slot(sandbox_id)
 
     threads = [threading.Thread(target=claim, args=(i,)) for i in ids]
@@ -90,11 +90,11 @@ def test_concurrent_claims_never_share_a_slot(fake_sandboxes_root):
     for t in threads:
         t.join()
 
-    assert sorted(results.values()) == list(range(1, 21))   # 20 different slots, no gaps
+    assert sorted(results.values()) == list(range(1, 21))
 
 
 def test_find_slot(fake_sandboxes_root):
-    assert node_agent.find_slot(ID_A) is None          # empty database
+    assert node_agent.find_slot(ID_A) is None
     n = node_agent.claim_free_slot(ID_A)
     assert node_agent.find_slot(ID_A) == n
     assert node_agent.find_slot(ID_B) is None
@@ -105,14 +105,14 @@ def test_freed_slot_is_reused_under_a_new_id(fake_sandboxes_root):
     n = node_agent.claim_free_slot(ID_A)
     node_agent.release_slot(n, ID_A)
     assert node_agent.claim_free_slot(ID_B) == n
-    assert node_agent.find_slot(ID_A) is None          # old ID no longer reaches slot n
+    assert node_agent.find_slot(ID_A) is None
 
 
 def test_release_does_not_free_another_sandboxes_slot(fake_sandboxes_root):
     n = node_agent.claim_free_slot(ID_B)
-    node_agent.release_slot(n, ID_A)                   # A doesn't hold it
+    node_agent.release_slot(n, ID_A)
     assert node_agent.find_slot(ID_B) == n
-    node_agent.release_slot(99, ID_A)                  # missing slot: no error
+    node_agent.release_slot(99, ID_A)
 
 
 def test_require_slot_raises_lookup_error_for_unknown_sandbox(fake_sandboxes_root):
@@ -137,7 +137,6 @@ def test_pid_round_trip(fake_sandboxes_root):
 
 
 def test_stale_pid_is_not_ours():
-    # PID 1 (init) exists but is certainly not this sandbox's Firecracker.
     assert node_agent.pid_still_belongs_to_sandbox(1, ID_A) is False
 
 
@@ -186,10 +185,10 @@ def test_create_sandbox_rejects_bad_or_reused_ids(fake_sandboxes_root, monkeypat
     monkeypatch.setattr(node_agent, "ensure_cgroup_parent", lambda: None)
     with pytest.raises(ValueError):
         node_agent.create_sandbox("../etc")
-    os.mkdir(node_agent.sandbox_dir(ID_A))           # ID_A already exists on this host
+    os.mkdir(node_agent.sandbox_dir(ID_A))
     with pytest.raises(FileExistsError):
         node_agent.create_sandbox(ID_A)
-    assert os.path.isdir(node_agent.sandbox_dir(ID_A))   # the existing sandbox was not touched
+    assert os.path.isdir(node_agent.sandbox_dir(ID_A))
 
 
 def test_destroy_frees_slot_only_after_network_is_deleted(fake_sandboxes_root, monkeypatch):
@@ -206,7 +205,7 @@ def test_destroy_frees_slot_only_after_network_is_deleted(fake_sandboxes_root, m
 
     node_agent.destroy_sandbox(ID_A)
 
-    assert events == [("network", n, n)]               # slot still held while network was deleted
+    assert events == [("network", n, n)]
     assert node_agent.find_slot(ID_A) is None
     assert not os.path.exists(node_agent.sandbox_dir(ID_A))
 
@@ -243,7 +242,7 @@ def test_destroy_without_a_slot_skips_network(fake_sandboxes_root, monkeypatch):
 def test_is_sandbox_running_without_a_pid(fake_sandboxes_root):
     os.mkdir(node_agent.sandbox_dir(ID_A))
     assert node_agent.is_sandbox_running(ID_A) is False
-    node_agent.save_pid(ID_A, 1)                       # PID 1 exists but isn't this sandbox's Firecracker
+    node_agent.save_pid(ID_A, 1)
     assert node_agent.is_sandbox_running(ID_A) is False
 
 
@@ -254,9 +253,9 @@ def test_is_sandbox_running_rejects_bad_ids():
 
 def test_list_host_sandboxes(fake_sandboxes_root):
     assert node_agent.list_host_sandboxes() == []
-    os.mkdir(node_agent.sandbox_dir(ID_A))             # has a folder
-    node_agent.claim_free_slot(ID_B)                   # holds a slot but its folder is gone (orphan)
-    os.mkdir(f"{fake_sandboxes_root}/sbx1")            # old-format leftover: not ours, ignored
+    os.mkdir(node_agent.sandbox_dir(ID_A))
+    node_agent.claim_free_slot(ID_B)
+    os.mkdir(f"{fake_sandboxes_root}/sbx1")
     assert node_agent.list_host_sandboxes() == sorted([ID_A, ID_B])
 
 
@@ -269,7 +268,7 @@ def write_file_of_size(path, size):
     """Create a file of `size` bytes, making its folder if needed (test setup)."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
-        f.truncate(size)                               # sparse, so a 1 GiB mem costs no real disk
+        f.truncate(size)
 
 
 def write_full_snapshot(sandbox_id):
@@ -285,7 +284,7 @@ class FakeFirecracker:
     def __init__(self):
         self.calls = []
         self.killed = []
-        self.mem_bytes_to_write = None                 # None: snapshot/create writes no files
+        self.mem_bytes_to_write = None
 
     def put(self, client, path, body):
         """Remember a PUT; for snapshot/create, write the snapshot files if a size was set."""
@@ -353,7 +352,7 @@ def test_pause_never_passes_on_files_from_an_earlier_pause(fake_firecracker):
 
 def test_pause_leaves_a_paused_sandboxs_snapshot_alone(fake_sandboxes_root):
     """Pausing twice must not delete the only copy of a paused sandbox."""
-    write_full_snapshot(ID_A)                          # no PID file, so it isn't running
+    write_full_snapshot(ID_A)
     with pytest.raises(RuntimeError, match="not running"):
         node_agent.pause_sandbox(ID_A)
     assert os.path.getsize(node_agent.mem_path(ID_A)) == FULL_MEM_BYTES

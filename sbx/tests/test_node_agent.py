@@ -53,7 +53,7 @@ def test_two_sandboxes_run_commands_and_are_isolated():
 
         write_file(a.id, "/root/x.txt", "from a")
         assert read_file(a.id, "/root/x.txt") == "from a"
-        assert exec(b.id, "cat /root/x.txt")["exit_code"] != 0   # b can't see a's files
+        assert exec(b.id, "cat /root/x.txt")["exit_code"] != 0
     finally:
         destroy_sandbox(a.id)
         destroy_sandbox(b.id)
@@ -68,7 +68,7 @@ def test_slot_is_reused_under_a_new_id():
         assert second.n == first.n
         assert second.id != first.id
         with pytest.raises(LookupError):
-            exec(first.id, "echo hi")          # old ID can't reach the new sandbox
+            exec(first.id, "echo hi")
         assert exec(second.id, "echo hi")["stdout"].strip() == "hi"
     finally:
         destroy_sandbox(second.id)
@@ -82,7 +82,6 @@ def test_api_server_helpers():
         assert sbx.id == sandbox_id
         assert is_sandbox_running(sandbox_id)
         assert sandbox_id in list_host_sandboxes()
-        # Firecracker is in its own session, so Ctrl+C on the API server doesn't reach it.
         assert os.getsid(sbx.pid) != os.getsid(0)
     finally:
         destroy_sandbox(sandbox_id)
@@ -145,9 +144,9 @@ def test_nothing_is_left_behind():
 
     leftover_files = [
         name for name in os.listdir(node_agent.SANDBOXES_ROOT)
-        if not name.startswith("state.db")              # the database (and its -wal/-shm files) stays
+        if not name.startswith("state.db")
     ]
     assert leftover_files == []
-    assert node_agent.slot_holders() == []              # every slot was released
+    assert node_agent.slot_holders() == []
     assert leftover_cgroups == []
     assert leftover_processes.strip() == ""

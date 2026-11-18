@@ -7,8 +7,6 @@ try it by hand from sbx/:
       uv run python examples/agent/agent.py
 """
 
-## IMPORTS ##
-
 import json
 import os
 import posixpath
@@ -71,7 +69,6 @@ def history_to_messages(events: list[dict]) -> list[dict]:
             messages.append({"role": "user", "content": text})
 
         elif event["type"] in ("agent_output", "question"):
-            # keep adding to the assistant turn this agent already started
             if messages and messages[-1]["role"] == "assistant":
                 messages[-1]["content"] += "\n" + text
             else:
@@ -94,7 +91,6 @@ def run_tool(sandbox: Sandbox, name: str, args: dict) -> str:
 
         result = sandbox.exec(args["cmd"], cwd=WORKDIR, background=background)
 
-        # show the first few lines of output
         output = result.get("stdout", "") + result.get("stderr", "")
         for line in output.splitlines()[:5]:
             print(f"      {line}")
@@ -107,7 +103,6 @@ def run_tool(sandbox: Sandbox, name: str, args: dict) -> str:
         print(f"[read] {path}")
         return sandbox.read_file(path)
 
-    # otherwise it's write_file
     print(f"[write] {path}")
     sandbox.write_file(path, args["content"])
     return "ok"
@@ -126,7 +121,6 @@ def main() -> int:
     lets the model call tools until it answers in plain text
     returns the exit code: 0 when finished, 1 when it gave up
     """
-    # every printed line is an event the user sees, so send each one right away
     sys.stdout.reconfigure(line_buffering=True)
 
     task = sys.stdin.read().strip()
@@ -135,16 +129,14 @@ def main() -> int:
         return EXIT_FAILED
 
     sandbox = Sandbox.from_env()
-    client = OpenAI()   # reads OPENAI_API_KEY from the environment
+    client = OpenAI()
 
-    # the conversation so far, then the new message
     history = load_history(os.environ.get("SANDBOX_HISTORY"))
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages += history_to_messages(history)
     messages.append({"role": "user", "content": task})
 
     for _ in range(MAX_STEPS):
-        # ask the model what to do next
         response = client.chat.completions.create(
             model=MODEL,
             messages=messages,
@@ -153,18 +145,16 @@ def main() -> int:
         message = response.choices[0].message
         messages.append(message)
 
-        # no tool calls: the model is done, print its answer
         if not message.tool_calls:
             print(message.content or "")
             return EXIT_FINISHED
 
-        # run each tool call and send the result back to the model
         for call in message.tool_calls:
             try:
                 args = json.loads(call.function.arguments)
                 output = run_tool(sandbox, call.function.name, args)
             except Exception as e:
-                output = f"error: {e}"      # the model sees the error and can retry
+                output = f"error: {e}"
 
             messages.append({
                 "role": "tool",

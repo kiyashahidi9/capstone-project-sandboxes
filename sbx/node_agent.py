@@ -32,7 +32,7 @@ def _default_fc_dir() -> str:
     if "SBX_FC_DIR" in os.environ:
         return os.environ["SBX_FC_DIR"]
     real_user = os.environ.get("SUDO_USER", "")
-    real_home = os.path.expanduser(f"~{real_user}")      # "~alice" -> "/home/alice"
+    real_home = os.path.expanduser(f"~{real_user}")
     return f"{real_home}/fc"
 
 
@@ -267,10 +267,10 @@ def open_db() -> sqlite3.Connection:
     os.makedirs(SANDBOXES_ROOT, exist_ok=True)
     conn = sqlite3.connect(
         db_path(),
-        timeout=DB_BUSY_TIMEOUT,  # a second writer waits instead of failing with "database is locked"
-        isolation_level=None,     # autocommit: each statement is its own transaction
+        timeout=DB_BUSY_TIMEOUT,
+        isolation_level=None,
     )
-    conn.execute("PRAGMA journal_mode=WAL")   # readers aren't blocked while someone writes
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(SLOTS_SCHEMA)
     return conn
 
@@ -280,8 +280,6 @@ def claim_free_slot(sandbox_id: str) -> int:
     with closing(open_db()) as conn:
         for n in range(MIN_SANDBOX_NUMBER, MAX_SANDBOX_NUMBER + 1):
             try:
-                # One INSERT = check + claim in one step: the PRIMARY KEY on n
-                # rejects it if the slot is taken, so no two callers get the same n.
                 conn.execute("INSERT INTO slots (n, sandbox_id) VALUES (?, ?)", (n, sandbox_id))
                 return n
             except sqlite3.IntegrityError:
@@ -354,11 +352,11 @@ def start_firecracker(sandbox_id: str, n: int) -> int:
         "ip", "netns", "exec", namespace_for(n),
         "firecracker", "--api-sock", socket_path(sandbox_id),
     ]
-    with open(console_log_path(sandbox_id), "a") as console_log:   # "a": a resume adds to the boot log instead of erasing it
+    with open(console_log_path(sandbox_id), "a") as console_log:
         process = subprocess.Popen(
             command, stdout=console_log, stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,  # don't share our terminal: Firecracker would take over the keyboard for the VM's console
-            start_new_session=True,   # own session: Ctrl+C on the API server doesn't kill running VMs (1g restart test)
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
         )
     return process.pid
 
@@ -505,17 +503,17 @@ def create_sandbox(sandbox_id: str | None = None) -> Sandbox:
         sandbox_id = new_sandbox_id()
     validate_sandbox_id(sandbox_id)
     ensure_cgroup_parent()
-    os.makedirs(sandbox_dir(sandbox_id))   # raises FileExistsError if this ID was already used
+    os.makedirs(sandbox_dir(sandbox_id))
 
     try:
-        n = claim_free_slot(sandbox_id)    # inside try, so "all slots in use" still removes the folder
+        n = claim_free_slot(sandbox_id)
         copy_base_image(sandbox_id)
         create_network(n)
         create_cgroup(sandbox_id)
 
         boot_started = time.monotonic()
         pid = start_firecracker(sandbox_id, n)
-        save_pid(sandbox_id, pid)          # saved first, so cleanup can kill it
+        save_pid(sandbox_id, pid)
         move_into_cgroup(sandbox_id, pid)
         wait_for_socket(sandbox_id)
         configure_and_boot_vm(sandbox_id)
@@ -611,12 +609,8 @@ def remove_sandbox_dir(sandbox_id: str) -> None:
 
 def destroy_sandbox(sandbox_id: str) -> None:
     """Stop the sandbox and remove everything it created; safe on a half-created sandbox."""
-    # Order matters: the process must be gone before its cgroup can be removed;
-    # the slot is freed only after its network is deleted, so the next sandbox
-    # in that slot can't collide with a leftover veth; and the folder goes last
-    # because it holds the PID file.
     validate_sandbox_id(sandbox_id)
-    n = find_slot(sandbox_id)          # None if create failed before claiming a slot
+    n = find_slot(sandbox_id)
     kill_firecracker(sandbox_id)
     remove_cgroup(sandbox_id)
     if n is not None:
@@ -732,7 +726,7 @@ def require_stopped(sandbox_id: str) -> None:
 def start_vm_process(sandbox_id: str, n: int) -> int:
     """Start an empty Firecracker for the sandbox, ready to receive API calls; return its PID."""
     pid = start_firecracker(sandbox_id, n)
-    save_pid(sandbox_id, pid)          # saved first, so cleanup can kill it (4a gotcha)
+    save_pid(sandbox_id, pid)
     move_into_cgroup(sandbox_id, pid)
     wait_for_socket(sandbox_id)
     return pid
@@ -768,7 +762,7 @@ def resume_sandbox(sandbox_id: str) -> dict:
         timings["load_s"] = timed(lambda: restore_vm(sandbox_id))
         timings["health_s"] = timed(lambda: wait_for_guest_agent(sandbox_id))
     except BaseException:
-        kill_firecracker(sandbox_id)   # keep snap/: it's the only copy, so a later resume can retry
+        kill_firecracker(sandbox_id)
         raise
 
     return {"pid": pid, **timings}
@@ -812,7 +806,7 @@ def exec(sandbox_id: str, cmd: str, cwd: str = "/root",
     response = httpx.post(
         guest_agent_url(sandbox_id, "/exec"),
         json=body,
-        timeout=timeout + EXEC_HTTP_MARGIN,   # let the agent's own timeout fire first
+        timeout=timeout + EXEC_HTTP_MARGIN,
     )
     response.raise_for_status()
     return response.json()

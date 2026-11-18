@@ -4,8 +4,6 @@ runs the client's agent once per message, following docs/agent_contract.md
 turns every line it prints into an event, and knows when the turn starts and ends
 """
 
-## IMPORTS ##
-
 from __future__ import annotations
 
 import collections
@@ -93,12 +91,10 @@ def run_turn(sandbox_id: str) -> None:
             try:
                 run_locked_turn(sandbox_id, turn)
             except Exception as error:
-                # a bug in the runner must not leave the sandbox working forever
                 db.append_event(sandbox_id, EventType.TURN_FAILED, {"reason": f"runner error: {error}"})
             finally:
                 db.set_turn_state(sandbox_id, TurnState.IDLE)
     finally:
-        # the next message may already have started a new turn; only remove this one
         with _turns_guard:
             if _turns.get(sandbox_id) is turn:
                 del _turns[sandbox_id]
@@ -109,7 +105,6 @@ def run_locked_turn(sandbox_id: str, turn: Turn) -> None:
     """Does the turn's work; run_turn holds the sandbox's lock and cleans up afterwards."""
     db.append_event(sandbox_id, EventType.TURN_STARTED, {})
 
-    # a pause can land between the message and here
     row = db.get_sandbox(sandbox_id)
     if turn.stopped or row is None or row.state != SandboxState.RUNNING:
         db.append_event(sandbox_id, EventType.TURN_FAILED, {"reason": "paused"})
@@ -120,12 +115,10 @@ def run_locked_turn(sandbox_id: str, turn: Turn) -> None:
         db.append_event(sandbox_id, EventType.TURN_FAILED, {"reason": "AGENT_CMD is not set"})
         return
 
-    # the newest message goes on stdin; everything before it is the history
     events = db.list_events(sandbox_id)
     message = next(event for event in reversed(events) if event.type == EventType.USER_MESSAGE)
     history = [event.model_dump() for event in events if event.seq < message.seq]
 
-    # the token only works for this sandbox, and only until the turn ends
     token = auth.new_turn_token(sandbox_id)
     history_path = write_history(history)
     try:
@@ -143,7 +136,7 @@ def turn_file(prefix: str, suffix: str) -> str:
     Makes an empty file only root can read, and gives its path
     locked down: in TURNS_DIR, which the agent can enter but not list, so names can't be guessed
     """
-    folder = TURNS_DIR if locked_down() else None   # None: the system temp folder
+    folder = TURNS_DIR if locked_down() else None
     handle, path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=folder)
     os.close(handle)
     return path
@@ -156,9 +149,8 @@ def write_history(history: list[dict]) -> str:
     with open(path, "w", encoding="utf-8") as file:
         json.dump(history, file)
 
-    # locked down: readable by the agent's group too, still not by other users
     if locked_down():
-        import grp   # POSIX only
+        import grp
 
         os.chown(path, -1, grp.getgrnam(AGENT_USER).gr_gid)
         os.chmod(path, 0o640)
@@ -206,19 +198,18 @@ def systemd_command(unit: str, environment_file: str, agent_command: list[str]) 
     """
     command = [
         "systemd-run",
-        "--wait",                     # stay running until the agent exits, and exit with its code
-        "--pipe",                     # connect the agent's stdin, stdout and stderr to ours
-        "--collect",                  # forget the unit afterwards, even if it failed
-        "--quiet",                    # no "Running as unit ..." line on stderr
-        f"--unit={unit}",             # a name, so we can kill it
+        "--wait",
+        "--pipe",
+        "--collect",
+        "--quiet",
+        f"--unit={unit}",
         f"--uid={AGENT_USER}",
         f"--gid={AGENT_USER}",
     ]
 
-    # systemd's own limit, a little after ours, in case the runner itself hangs
     properties = list(SYSTEMD_PROPERTIES)
     properties.append(f"RuntimeMaxSec={int(turn_timeout()) + 30}")
-    properties.append(f"EnvironmentFile={environment_file}")   # read by systemd as root, before switching user
+    properties.append(f"EnvironmentFile={environment_file}")
 
     for prop in properties:
         command += ["-p", prop]
@@ -241,12 +232,11 @@ def run_agent(
     """
     environment_file = None
 
-    # locked down: through systemd-run; otherwise in its own process group, so killing it kills what it started
     if locked_down():
         environment_file = write_environment_file(environment)
         unit = f"sbx-turn-{sandbox_id}-{secrets.token_hex(4)}"
         command = systemd_command(unit, environment_file, agent_command)
-        process_environment = None    # systemd-run itself runs with the server's environment
+        process_environment = None
     else:
         unit = None
         command = agent_command
@@ -262,8 +252,8 @@ def run_agent(
                 env=process_environment,
                 text=True,
                 encoding="utf-8",
-                errors="replace",         # a stray non-UTF-8 byte can't crash the runner
-                start_new_session=True,   # POSIX only; ignored on Windows
+                errors="replace",
+                start_new_session=True,
             )
         except OSError as error:
             db.append_event(sandbox_id, EventType.TURN_FAILED, {"reason": f"agent failed to start: {error}"})
@@ -278,7 +268,6 @@ def run_agent(
 
 def follow_agent(sandbox_id: str, turn: Turn, process: subprocess.Popen, unit: str | None, message: str) -> None:
     """Feeds the agent its message, records its lines until it exits, then records the end."""
-    # let stop_turn find it; if a pause came in while it was starting, stop it now
     with _turns_guard:
         turn.process = process
         turn.unit = unit
@@ -286,19 +275,16 @@ def follow_agent(sandbox_id: str, turn: Turn, process: subprocess.Popen, unit: s
     if stopped_already:
         kill(turn)
 
-    # keep the end of stderr in the background, so a full pipe can't block the agent
     stderr_tail: collections.deque[str] = collections.deque(maxlen=STDERR_LINES_KEPT)
     stderr_reader = threading.Thread(target=keep_lines, args=(process.stderr, stderr_tail), daemon=True)
     stderr_reader.start()
 
-    # kill it if it runs too long
     timer = threading.Timer(turn_timeout(), time_out, args=(turn,))
     timer.daemon = True
     timer.start()
 
     send_message(process, message)
 
-    # every line on stdout is an event
     for line in process.stdout:
         record_line(sandbox_id, line.rstrip("\r\n"))
 
@@ -315,7 +301,7 @@ def send_message(process: subprocess.Popen, message: str) -> None:
         process.stdin.write(message)
         process.stdin.close()
     except OSError:
-        pass   # the agent exited without reading it; its exit code tells the story
+        pass
 
 
 def keep_lines(stream, tail: collections.deque[str]) -> None:
@@ -398,7 +384,6 @@ def kill(turn: Turn) -> None:
 
     try:
         if turn.unit is not None:
-            # every process in the unit, which runs as sbx-agent; then systemd-run exits too
             subprocess.run(
                 ["systemctl", "kill", "--signal=SIGKILL", turn.unit],
                 capture_output=True,
@@ -406,7 +391,7 @@ def kill(turn: Turn) -> None:
             )
             process.kill()
         elif os.name == "posix":
-            os.killpg(process.pid, signal.SIGKILL)   # the whole process group
+            os.killpg(process.pid, signal.SIGKILL)
         else:
             process.kill()
     except (ProcessLookupError, PermissionError, OSError, subprocess.TimeoutExpired):
@@ -426,7 +411,6 @@ def stop_turn(sandbox_id: str) -> None:
             return
         turn.stopped = True
 
-    # not started yet: follow_agent sees stopped and kills it as soon as it starts
     kill(turn)
 
     turn.done.wait()

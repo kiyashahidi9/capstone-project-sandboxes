@@ -44,21 +44,17 @@ class Handler(BaseHTTPRequestHandler):
         """
         request = self.json_body()
 
-        # the command to run (required)
         cmd = request.get("cmd")
         if not isinstance(cmd, str) or not cmd:
             raise BadRequest('"cmd" must be a non-empty string')
 
-        # the folder to run it in (optional)
         cwd = request.get("cwd", DEFAULT_CWD)
         if not os.path.isdir(cwd):
             raise BadRequest(f"cwd does not exist: {cwd}")
 
-        # background: start it and return the pid
         if request.get("background"):
             return self.send(200, run_background(cmd, cwd))
 
-        # foreground: wait for it and return its output
         timeout = request.get("timeout", DEFAULT_TIMEOUT)
         self.send(200, run_foreground(cmd, cwd, timeout))
 
@@ -70,11 +66,9 @@ class Handler(BaseHTTPRequestHandler):
         """
         path = self.path_param()
 
-        # no such file
         if not os.path.isfile(path):
             return self.send(404, {"error": f"no such file: {path}"})
 
-        # send the bytes as-is
         with open(path, "rb") as f:
             self.send(200, f.read(), "application/octet-stream")
 
@@ -85,7 +79,6 @@ class Handler(BaseHTTPRequestHandler):
         """
         path = self.path_param()
 
-        # write the request body to the file
         write_file_atomically(path, self.body())
 
         self.send(200, {"ok": True})
@@ -100,7 +93,7 @@ class Handler(BaseHTTPRequestHandler):
             handler(self)
         except BadRequest as e:
             self.send(400, {"error": str(e)})
-        except Exception as e:  # keep the agent alive whatever happens
+        except Exception as e:
             self.send(500, {"error": f"{type(e).__name__}: {e}"})
 
     def do_GET(self):
