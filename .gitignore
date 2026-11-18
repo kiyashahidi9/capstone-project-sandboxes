@@ -1,14 +1,8 @@
-# Ignore everything at the top level...
+# Ignore everything at the top level except sbx, .githooks, and this file
 /*
-
-# ...except the sbx folder, shared repo config, and this file
 !/sbx/
 !/.gitignore
-!/README.md
-!/TRACK_A.md
 !/.githooks/
-!/.env.example
-!/.ua/
 
 # Understand-Anything scratch output (the knowledge graph itself is committed)
 .ua/intermediate/
