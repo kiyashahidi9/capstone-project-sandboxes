@@ -324,10 +324,21 @@ def keep_lines(stream, tail: collections.deque[str]) -> None:
         tail.append(line.rstrip("\r\n"))
 
 
+# A JSON line with one of these types is that step. The data is the object without "type".
+RECORDED_STEPS: dict[str, EventType] = {
+    "llm_request": EventType.LLM_REQUEST,
+    "llm_response": EventType.LLM_RESPONSE,
+    "tool_started": EventType.TOOL_STARTED,
+    "tool_completed": EventType.TOOL_COMPLETED,
+}
+
+
 def record_line(sandbox_id: str, line: str) -> None:
     """
     Saves one line the agent printed
-    a JSON object with "type": "question" is a question; anything else is plain output
+    a JSON object with "type": "question" is a question
+    a JSON object with a recorded step type is that event
+    anything else is plain output
     """
     try:
         parsed = json.loads(line)
@@ -336,8 +347,15 @@ def record_line(sandbox_id: str, line: str) -> None:
 
     if isinstance(parsed, dict) and parsed.get("type") == "question":
         db.append_event(sandbox_id, EventType.QUESTION, {"text": str(parsed.get("text", ""))})
-    else:
-        db.append_event(sandbox_id, EventType.AGENT_OUTPUT, {"text": line})
+        return
+
+    step: EventType | None = RECORDED_STEPS.get(parsed.get("type")) if isinstance(parsed, dict) else None
+    if isinstance(parsed, dict) and step is not None:
+        data: dict = {key: value for key, value in parsed.items() if key != "type"}
+        db.append_event(sandbox_id, step, data)
+        return
+
+    db.append_event(sandbox_id, EventType.AGENT_OUTPUT, {"text": line})
 
 
 def record_end(sandbox_id: str, turn: Turn, exit_code: int, stderr_tail: str) -> None:

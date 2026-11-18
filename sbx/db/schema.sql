@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS sandboxes (
 CREATE TABLE IF NOT EXISTS events (
     sandbox_id  TEXT NOT NULL,
     seq         INTEGER NOT NULL,   -- 1, 2, 3, ... per sandbox
-    type        TEXT NOT NULL,      -- user_message | agent_output | question | turn_started | turn_finished | turn_failed | paused | resumed
+    type        TEXT NOT NULL,      -- user_message | agent_output | question | llm_request | llm_response | tool_started | tool_completed | turn_started | turn_finished | turn_failed | paused | resumed
     data        TEXT NOT NULL,      -- JSON
     at          INTEGER NOT NULL,   -- unix seconds
     PRIMARY KEY (sandbox_id, seq)

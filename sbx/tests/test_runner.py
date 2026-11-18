@@ -36,6 +36,58 @@ print(json.dumps({"type": "question", "text": "which port?"}))
 print('{"type": "note"}')
 """
 
+# one model round: the request, the tool call, the action, both results, then plain text
+RECORDS_STEPS = r"""
+import json
+print(json.dumps({
+    "type": "llm_request",
+    "model": "gpt-4.1",
+    "system": "You are a coding agent.",
+    "tools": [{"type": "function", "function": {"name": "run_command"}}],
+    "messages": [{"role": "user", "content": "do the thing"}],
+}))
+print(json.dumps({
+    "type": "llm_response",
+    "tool_calls": [{
+        "tool_call_id": "call_1",
+        "name": "write_file",
+        "arguments": {"path": "hello.py", "content": "print('hi')"},
+    }],
+}))
+print(json.dumps({
+    "type": "tool_started",
+    "tool_call_id": "call_1",
+    "name": "write_file",
+    "arguments": {"path": "hello.py", "content": "print('hi')"},
+}))
+print(json.dumps({
+    "type": "tool_completed",
+    "tool_call_id": "call_1",
+    "result": {"path": "hello.py", "content": "print('hi')"},
+}))
+print(json.dumps({
+    "type": "llm_response",
+    "tool_calls": [{
+        "tool_call_id": "call_2",
+        "name": "run_command",
+        "arguments": {"cmd": "echo hi"},
+    }],
+}))
+print(json.dumps({
+    "type": "tool_started",
+    "tool_call_id": "call_2",
+    "name": "run_command",
+    "arguments": {"cmd": "echo hi"},
+}))
+print(json.dumps({
+    "type": "tool_completed",
+    "tool_call_id": "call_2",
+    "result": {"exit_code": 0, "stdout": "hi\n", "stderr": ""},
+}))
+print(json.dumps({"type": "llm_response", "text": "done"}))
+print("still plain text")
+"""
+
 SLEEPS = """
 import time
 print("starting", flush=True)
@@ -120,6 +172,60 @@ def test_exit_one_fails_the_turn_with_the_end_of_stderr(tmp_path, monkeypatch):
     assert output == (EventType.AGENT_OUTPUT, {"text": "working on it"})
     assert last_type == EventType.TURN_FAILED
     assert last_data == {"reason": "exit", "exit_code": 1, "stderr_tail": "something broke"}
+    assert_turn_over()
+
+
+def test_a_step_line_is_stored_as_its_own_event(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, RECORDS_STEPS)
+    send()
+
+    runner.run_turn(SANDBOX_ID)
+
+    assert events() == [
+        (EventType.USER_MESSAGE, {"text": "do the thing"}),
+        (EventType.TURN_STARTED, {}),
+        (EventType.LLM_REQUEST, {
+            "model": "gpt-4.1",
+            "system": "You are a coding agent.",
+            "tools": [{"type": "function", "function": {"name": "run_command"}}],
+            "messages": [{"role": "user", "content": "do the thing"}],
+        }),
+        (EventType.LLM_RESPONSE, {
+            "tool_calls": [{
+                "tool_call_id": "call_1",
+                "name": "write_file",
+                "arguments": {"path": "hello.py", "content": "print('hi')"},
+            }],
+        }),
+        (EventType.TOOL_STARTED, {
+            "tool_call_id": "call_1",
+            "name": "write_file",
+            "arguments": {"path": "hello.py", "content": "print('hi')"},
+        }),
+        (EventType.TOOL_COMPLETED, {
+            "tool_call_id": "call_1",
+            "result": {"path": "hello.py", "content": "print('hi')"},
+        }),
+        (EventType.LLM_RESPONSE, {
+            "tool_calls": [{
+                "tool_call_id": "call_2",
+                "name": "run_command",
+                "arguments": {"cmd": "echo hi"},
+            }],
+        }),
+        (EventType.TOOL_STARTED, {
+            "tool_call_id": "call_2",
+            "name": "run_command",
+            "arguments": {"cmd": "echo hi"},
+        }),
+        (EventType.TOOL_COMPLETED, {
+            "tool_call_id": "call_2",
+            "result": {"exit_code": 0, "stdout": "hi\n", "stderr": ""},
+        }),
+        (EventType.LLM_RESPONSE, {"text": "done"}),
+        (EventType.AGENT_OUTPUT, {"text": "still plain text"}),
+        (EventType.TURN_FINISHED, {"exit_code": 0}),
+    ]
     assert_turn_over()
 
 

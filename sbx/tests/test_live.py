@@ -74,6 +74,25 @@ def test_the_first_cpu_reading_is_not_a_percent(tmp_path, monkeypatch):
     assert len(memory.samples[ID]) == 1
 
 
+def test_an_open_tool_stays_working(tmp_path, monkeypatch):
+    """A tool_started with no tool_completed stays WORKING, even after a question."""
+    temp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(node_agent, "read_cpu_usage_usec", lambda sandbox_id: None)
+    db.insert_sandbox(ID)
+    db.set_state(ID, SandboxState.RUNNING)
+    db.append_event(ID, EventType.TOOL_STARTED, {
+        "tool_call_id": "call_1",
+        "name": "send_email",
+        "arguments": {"to": "a@b.com"},
+    })
+    db.append_event(ID, EventType.QUESTION, {"text": "which file?"})
+
+    found = judge_sandbox(SampleMemory(), ID, datetime.now(UTC))
+
+    assert found is not None
+    assert found.activity is Activity.WORKING
+
+
 def test_a_destroyed_sandbox_is_skipped(tmp_path, monkeypatch):
     temp_db(tmp_path, monkeypatch)
     monkeypatch.setattr(node_agent, "read_cpu_usage_usec", lambda sandbox_id: None)

@@ -27,13 +27,15 @@ STORED_TO_JUDGE: dict[StoredEvent, EventType] = {
     StoredEvent.USER_MESSAGE: EventType.USER_INSTRUCTION,
     StoredEvent.TURN_STARTED: EventType.AGENT_STARTED,
     StoredEvent.QUESTION: EventType.AGENT_WAITING_FOR_USER,
+    StoredEvent.TOOL_STARTED: EventType.TOOL_STARTED,
+    StoredEvent.TOOL_COMPLETED: EventType.TOOL_COMPLETED,
     StoredEvent.TURN_FINISHED: EventType.AGENT_COMPLETED,
     StoredEvent.TURN_FAILED: EventType.AGENT_FAILED,
 }
 
 
 class Judgement(NamedTuple):
-    """One sandbox's activity and the decision for it. The decision is not carried out."""
+    """One sandbox's activity and the decision for it. judge_live does not carry it out."""
 
     sandbox_id: str
     activity: Activity
@@ -61,6 +63,8 @@ def load_events(sandbox_id: str) -> list[AgentEvent]:
     """Map the stored conversation onto the events classify understands.
 
     agent_output is left out. It is a line the user saw, not a lifecycle event.
+    llm_request and llm_response are left out. They replay the model call, and they do not change activity.
+    tool_started and tool_completed are paired by tool_call_id. An id with no completion stays WORKING.
     """
     events: list[AgentEvent] = []
     for stored in db.list_events(sandbox_id):

@@ -55,12 +55,13 @@ def get_observation_window(
 
 
 def run_until_stopped(memory: SampleMemory, stop: threading.Event, interval: float | None = None) -> None:
-    """Judge, then wait. The same memory is kept for the next pass. Nothing is paused."""
+    """Judge, carry out pause and resume, then wait. The same memory is kept for the next pass."""
+    from api.enforce import apply_judgements
     from control import live
 
     wait: float = Policy().sample_interval.total_seconds() if interval is None else interval
     while not stop.is_set():
-        live.judge_live(memory)
+        apply_judgements(live.judge_live(memory))
         if stop.is_set():
             return
         stop.wait(wait)
