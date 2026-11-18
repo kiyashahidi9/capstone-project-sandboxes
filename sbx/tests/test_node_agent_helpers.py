@@ -3,6 +3,7 @@ import sqlite3
 import threading
 from contextlib import closing, nullcontext
 
+import httpx
 import pytest
 
 import node_agent
@@ -388,3 +389,75 @@ def test_resume_kills_firecracker_and_keeps_the_snapshot_if_a_step_fails(fake_sa
     assert killed == [ID_A]
     assert os.path.exists(node_agent.vmstate_path(ID_A))
     assert os.path.exists(node_agent.mem_path(ID_A))
+
+
+# --- guest disk sync and clock (4b full) ---------------------------------------
+
+class FakeGuestAgent:
+    """Stands in for the guest agent's HTTP API, remembering every POST and answering with a set status."""
+
+    def __init__(self, status_code=200):
+        self.status_code = status_code
+        self.posts = []
+
+    def post(self, url, json=None, timeout=None):
+        """Records one POST and answers it like httpx would."""
+        self.posts.append((url, json))
+        return httpx.Response(self.status_code, json={"ok": True}, request=httpx.Request("POST", url))
+
+
+@pytest.fixture
+def fake_guest(monkeypatch):
+    """Send the node agent's guest agent calls to a fake instead of a real VM."""
+    guest = FakeGuestAgent()
+    monkeypatch.setattr(node_agent.httpx, "post", guest.post)
+    monkeypatch.setattr(node_agent, "guest_agent_url", lambda sandbox_id, path: f"http://guest{path}")
+    return guest
+
+
+def test_sync_calls_the_guest_sync_endpoint(fake_guest):
+    node_agent.sync_guest_disk(ID_A)
+    assert fake_guest.posts == [("http://guest/sync", None)]
+
+
+def test_sync_fails_the_pause_if_the_guest_cannot_sync(fake_guest):
+    """A pause without a flushed disk could corrupt files, so an error must stop it."""
+    fake_guest.status_code = 500
+    with pytest.raises(httpx.HTTPStatusError):
+        node_agent.sync_guest_disk(ID_A)
+
+
+def test_set_clock_sends_the_hosts_time(fake_guest, monkeypatch):
+    monkeypatch.setattr(node_agent.time, "time_ns", lambda: 1_794_960_000_000_000_000)
+    node_agent.set_guest_clock(ID_A)
+    assert fake_guest.posts == [("http://guest/clock", {"unix_ns": 1_794_960_000_000_000_000})]
+
+
+@pytest.fixture
+def resumable(fake_sandboxes_root, monkeypatch):
+    """Make resume_sandbox run without Firecracker, recording the order of its steps."""
+    steps = []
+    monkeypatch.setattr(node_agent, "start_vm_process", lambda sandbox_id, n: steps.append("start") or 4242)
+    monkeypatch.setattr(node_agent, "restore_vm", lambda sandbox_id: steps.append("load"))
+    monkeypatch.setattr(node_agent, "wait_for_guest_agent", lambda sandbox_id: steps.append("health"))
+    write_full_snapshot(ID_A)
+    insert_slot(2, ID_A)
+    return steps
+
+
+def test_resume_sets_the_clock_after_the_guest_answers(resumable, fake_guest):
+    timings = node_agent.resume_sandbox(ID_A)
+    assert resumable == ["start", "load", "health"]
+    assert [url for url, body in fake_guest.posts] == ["http://guest/clock"]
+    assert timings["clock_set"] is True
+    assert "clock_s" in timings
+
+
+def test_resume_still_succeeds_if_the_clock_cannot_be_set(resumable, fake_guest, monkeypatch):
+    """A guest agent from before /clock answers 404; the sandbox must still come back."""
+    killed = []
+    monkeypatch.setattr(node_agent, "kill_firecracker", killed.append)
+    fake_guest.status_code = 404
+    timings = node_agent.resume_sandbox(ID_A)
+    assert timings["clock_set"] is False
+    assert killed == []

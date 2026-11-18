@@ -21,6 +21,8 @@ COUNTER_COMMAND = (
     "i=$((i+1)); sleep 1; done"
 )
 COUNTER_WAIT = 3                                       # seconds, long enough for the count to rise
+CLOCK_PAUSE_WAIT = 10                                  # seconds paused: a clock left unset would be this far behind
+CLOCK_TOLERANCE = 2                                    # seconds; `date +%s` rounds down and exec takes a moment
 
 
 def start_counter(sandbox_id):
@@ -110,6 +112,24 @@ def test_pause_and_resume_keep_a_running_process():
 
         time.sleep(COUNTER_WAIT)
         assert read_counter(sbx.id) > count_before_pause
+    finally:
+        destroy_sandbox(sbx.id)
+
+
+def guest_clock_seconds(sandbox_id):
+    """Return the guest's wall-clock time, in whole seconds since 1970."""
+    return int(exec(sandbox_id, "date +%s")["stdout"].strip())
+
+
+def test_resume_sets_the_guest_clock_to_the_hosts_time():
+    """Without /clock the guest would wake up CLOCK_PAUSE_WAIT seconds behind (4b full)."""
+    sbx = create_sandbox()
+    try:
+        pause_sandbox(sbx.id)
+        time.sleep(CLOCK_PAUSE_WAIT)
+        resumed = resume_sandbox(sbx.id)
+        assert resumed["clock_set"] is True
+        assert abs(guest_clock_seconds(sbx.id) - time.time()) < CLOCK_TOLERANCE
     finally:
         destroy_sandbox(sbx.id)
 

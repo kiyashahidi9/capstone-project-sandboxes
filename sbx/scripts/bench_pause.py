@@ -28,7 +28,7 @@ import node_agent
 FILL_MARKER = "/tmp/bench_filled"   # the filler writes this once its memory is allocated
 FILL_WAIT_TIMEOUT = 60.0
 PAUSE_PARTS = ("sync_s", "freeze_s", "snapshot_s", "kill_s")
-RESUME_PARTS = ("start_s", "load_s", "health_s")
+RESUME_PARTS = ("start_s", "load_s", "health_s", "clock_s")
 COLUMNS = PAUSE_PARTS + ("pause_total_s",) + RESUME_PARTS + ("resume_total_s", "mem_file_mib")
 
 

@@ -195,6 +195,14 @@ background_job() {
   api POST /exec -d "{\"cmd\":\"kill -- -$pid\"}" >/dev/null                            # clean up its group
 }
 
+# sends the host's time to /clock, then checks the VM's clock is within 2 s of it
+clock_follows_host() {
+  expect '.ok == true' POST /clock -d "{\"unix_ns\":$(date +%s%N)}" || return 1
+  local guest
+  guest=$(api POST /exec -d '{"cmd":"date +%s"}' | jq -r '.stdout') || return 1
+  (( ${guest:-0} >= $(date +%s) - 2 ))
+}
+
 cmd_test() {
   [[ ${1:-} =~ ^[0-9]+$ ]] || die "usage: $0 test N"
   command -v jq >/dev/null || die "jq not installed (sudo apt install jq)"
@@ -217,6 +225,10 @@ cmd_test() {
   check "PUT creates parent folders"           expect '.ok == true' PUT "/files?path=/root/agent-test/sub/test.txt" --data-binary hello
   check "GET returns the contents"             file_is hello /root/agent-test/sub/test.txt
   check "GET missing file -> 404"              status_is 404 GET "/files?path=/root/agent-test/nope"
+  echo " pause and resume (4b)"
+  check "POST /sync -> ok"                     expect '.ok == true' POST /sync
+  check "POST /clock sets the VM's clock"      clock_follows_host
+  check "POST /clock bad time -> 400"          status_is 400 POST /clock -d '{"unix_ns":"soon"}'
   echo " network (set up at boot, no ssh)"
   check "guest default route via 172.16.0.1"   expect '.stdout | contains("via 172.16.0.1")' POST /exec -d '{"cmd":"ip route show default"}'
   check "guest reaches the internet"           expect '.stdout | test("HTTP/[0-9.]+ 200")' POST /exec -d '{"cmd":"curl -sI https://github.com | head -1"}'

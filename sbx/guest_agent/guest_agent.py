@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 from helpers import run_background, run_foreground, write_file_atomically
@@ -61,6 +62,25 @@ class Handler(BaseHTTPRequestHandler):
         # foreground: wait for it and return its output
         timeout = request.get("timeout", DEFAULT_TIMEOUT)
         self.send(200, run_foreground(cmd, cwd, timeout))
+
+    def sync(self) -> None:
+        """
+        POST /sync
+        writes the VM's cached file changes to disk
+        the host calls it just before a pause, so the disk matches the snapshot
+        """
+        os.sync()
+        self.send(200, {"ok": True})
+
+    def set_clock(self) -> None:
+        """
+        POST /clock {"unix_ns"}
+        sets the VM's clock to the time sent (nanoseconds since 1970, UTC)
+        the host calls it right after a resume, since a snapshot freezes the clock
+        """
+        unix_ns = self.unix_ns_param()
+        time.clock_settime_ns(time.CLOCK_REALTIME, unix_ns)
+        self.send(200, {"ok": True})
 
     def read_file(self) -> None:
         """
@@ -142,12 +162,21 @@ class Handler(BaseHTTPRequestHandler):
             raise BadRequest("?path= must be an absolute path")
         return path
 
+    def unix_ns_param(self):
+        """Reads "unix_ns" from the JSON body; a 400 unless it's a whole number above zero."""
+        unix_ns = self.json_body().get("unix_ns")
+        if isinstance(unix_ns, bool) or not isinstance(unix_ns, int) or unix_ns <= 0:
+            raise BadRequest('"unix_ns" must be a positive integer')
+        return unix_ns
+
 
 ## ROUTES ##
 
 ROUTES = {
     ("GET", "/health"): Handler.health,
     ("POST", "/exec"): Handler.exec_,
+    ("POST", "/sync"): Handler.sync,
+    ("POST", "/clock"): Handler.set_clock,
     ("GET", "/files"): Handler.read_file,
     ("PUT", "/files"): Handler.write_file,
 }

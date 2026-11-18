@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -13,6 +14,8 @@ from typing import Callable
 
 import httpx
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +67,7 @@ PROCESS_EXIT_TIMEOUT = 5.0
 EXEC_HTTP_MARGIN = 30.0           # extra HTTP time on top of a command's own timeout
 SNAPSHOT_HTTP_TIMEOUT = 60.0      # snapshot/create took 9.2s in 4a; httpx's default 5s would cut it off
 SYNC_TIMEOUT = 60                 # seconds the guest gets to write its cached files to disk before a pause
+CLOCK_HTTP_TIMEOUT = 5.0          # setting the guest clock is instant; anything slower means it's stuck
 
 BYTES_PER_MIB = 1024 * 1024
 
@@ -614,9 +618,8 @@ def clear_old_snapshot(sandbox_id: str) -> None:
 
 def sync_guest_disk(sandbox_id: str) -> None:
     """Make the guest write its cached file changes to disk, so rootfs.ext4 matches the snapshot."""
-    result = exec(sandbox_id, "sync", timeout=SYNC_TIMEOUT)
-    if result["exit_code"] != 0:
-        raise RuntimeError(f"sync failed in {sandbox_id}: {result['stderr']}")
+    response = httpx.post(guest_agent_url(sandbox_id, "/sync"), timeout=SYNC_TIMEOUT)
+    response.raise_for_status()
 
 
 def freeze_vm(client: httpx.Client) -> None:
@@ -722,6 +725,26 @@ def restore_vm(sandbox_id: str) -> None:
         load_snapshot(client, sandbox_id)
 
 
+def set_guest_clock(sandbox_id: str) -> None:
+    """Set the guest's clock to the host's time, since a snapshot leaves it stuck at the moment of the pause."""
+    response = httpx.post(
+        guest_agent_url(sandbox_id, "/clock"),
+        json={"unix_ns": time.time_ns()},
+        timeout=CLOCK_HTTP_TIMEOUT,
+    )
+    response.raise_for_status()
+
+
+def try_set_guest_clock(sandbox_id: str) -> bool:
+    """Set the guest's clock, logging a warning instead of failing the resume if it can't; return whether it worked."""
+    try:
+        set_guest_clock(sandbox_id)
+        return True
+    except httpx.HTTPError as error:   # e.g. a guest agent from before /clock answers 404
+        logger.warning("could not set the clock in %s, it stays behind: %s", sandbox_id, error)
+        return False
+
+
 def resume_sandbox(sandbox_id: str) -> dict:
     """Bring a paused sandbox back exactly where it left off; return its new PID and how long each part took."""
     validate_sandbox_id(sandbox_id)
@@ -740,7 +763,10 @@ def resume_sandbox(sandbox_id: str) -> dict:
         kill_firecracker(sandbox_id)   # keep snap/: it's the only copy, so a later resume can retry
         raise
 
-    return {"pid": pid, **timings}
+    clock_started = time.monotonic()
+    clock_set = try_set_guest_clock(sandbox_id)   # after the try: a wrong clock is no reason to kill the VM
+    timings["clock_s"] = time.monotonic() - clock_started
+    return {"pid": pid, **timings, "clock_set": clock_set}
 
 
 # ---------------------------------------------------------------------------
