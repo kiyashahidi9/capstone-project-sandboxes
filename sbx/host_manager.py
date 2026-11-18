@@ -1,4 +1,4 @@
-"""Host manager (node_agent.py): runs on the host and creates, pauses, resumes and deletes the sandboxes."""
+"""Host manager (host_manager.py): runs on the host and creates, pauses, resumes and deletes the sandboxes."""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ class Sandbox(BaseModel):
     n             3, the network slot (decides its namespace and IP)
     ip            "10.201.0.3", the address the host uses to reach the VM
     pid           Firecracker's process ID on the host
-    boot_seconds  time from starting Firecracker to the sandbox manager (guest_agent/) answering
+    boot_seconds  time from starting Firecracker to the sandbox manager (sandbox_manager/) answering
                   /health (write this in NOTES.md)
     """
 
@@ -441,25 +441,25 @@ def configure_and_boot_vm(sandbox_id: str) -> None:
 # create_sandbox, step 10: wait for the sandbox manager
 # ---------------------------------------------------------------------------
 
-def guest_agent_url(sandbox_id: str, path: str) -> str:
+def sandbox_manager_url(sandbox_id: str, path: str) -> str:
     """Return the full URL of a sandbox manager endpoint, e.g. http://10.201.0.3:49983/exec."""
     ip = guest_ip_for(require_slot(sandbox_id))
     return f"http://{ip}:{GUEST_AGENT_PORT}{path}"
 
 
-def guest_agent_is_healthy(sandbox_id: str) -> bool:
+def sandbox_manager_is_healthy(sandbox_id: str) -> bool:
     """Return True if the sandbox manager answers /health; a connection error means not yet."""
     try:
-        response = httpx.get(guest_agent_url(sandbox_id, "/health"), timeout=1.0)
+        response = httpx.get(sandbox_manager_url(sandbox_id, "/health"), timeout=1.0)
         return response.status_code == 200 and response.json().get("ok") is True
     except (httpx.HTTPError, ValueError):
         return False
 
 
-def wait_for_guest_agent(sandbox_id: str) -> None:
+def wait_for_sandbox_manager(sandbox_id: str) -> None:
     """Wait (up to 30 s) until the sandbox manager inside the VM answers /health."""
     wait_until(
-        lambda: guest_agent_is_healthy(sandbox_id),
+        lambda: sandbox_manager_is_healthy(sandbox_id),
         timeout=HEALTH_WAIT_TIMEOUT,
         interval=HEALTH_POLL_INTERVAL,
         waiting_for=f"sandbox manager in {sandbox_id} to answer /health",
@@ -494,7 +494,7 @@ def create_sandbox(sandbox_id: str | None = None) -> Sandbox:
         move_into_cgroup(sandbox_id, pid)
         wait_for_socket(sandbox_id)
         configure_and_boot_vm(sandbox_id)
-        wait_for_guest_agent(sandbox_id)
+        wait_for_sandbox_manager(sandbox_id)
         boot_seconds = time.monotonic() - boot_started
     except BaseException:
         destroy_sandbox(sandbox_id)
@@ -620,7 +620,7 @@ def clear_old_snapshot(sandbox_id: str) -> None:
 
 def sync_guest_disk(sandbox_id: str) -> None:
     """Make the guest write its cached file changes to disk, so rootfs.ext4 matches the snapshot."""
-    response = httpx.post(guest_agent_url(sandbox_id, "/sync"), timeout=SYNC_TIMEOUT)
+    response = httpx.post(sandbox_manager_url(sandbox_id, "/sync"), timeout=SYNC_TIMEOUT)
     response.raise_for_status()
 
 
@@ -730,7 +730,7 @@ def restore_vm(sandbox_id: str) -> None:
 def set_guest_clock(sandbox_id: str) -> None:
     """Set the guest's clock to the host's time, since a snapshot leaves it stuck at the moment of the pause."""
     response = httpx.post(
-        guest_agent_url(sandbox_id, "/clock"),
+        sandbox_manager_url(sandbox_id, "/clock"),
         json={"unix_ns": time.time_ns()},
         timeout=CLOCK_HTTP_TIMEOUT,
     )
@@ -760,7 +760,7 @@ def resume_sandbox(sandbox_id: str) -> dict:
         pid = start_vm_process(sandbox_id, n)
         timings = {"start_s": time.monotonic() - started}
         timings["load_s"] = timed(lambda: restore_vm(sandbox_id))
-        timings["health_s"] = timed(lambda: wait_for_guest_agent(sandbox_id))
+        timings["health_s"] = timed(lambda: wait_for_sandbox_manager(sandbox_id))
     except BaseException:
         kill_firecracker(sandbox_id)   # keep snap/: it's the only copy, so a later resume can retry
         raise
@@ -807,7 +807,7 @@ def exec(sandbox_id: str, cmd: str, cwd: str = "/root",
     """Run a shell command in the sandbox; return {exit_code, stdout, stderr}, or {pid} if background."""
     body = {"cmd": cmd, "cwd": cwd, "background": background, "timeout": timeout}
     response = httpx.post(
-        guest_agent_url(sandbox_id, "/exec"),
+        sandbox_manager_url(sandbox_id, "/exec"),
         json=body,
         timeout=timeout + EXEC_HTTP_MARGIN,   # let the agent's own timeout fire first
     )
@@ -817,7 +817,7 @@ def exec(sandbox_id: str, cmd: str, cwd: str = "/root",
 
 def read_file(sandbox_id: str, path: str) -> str:
     """Return a file's contents from inside the sandbox; raise FileNotFoundError if it's missing."""
-    response = httpx.get(guest_agent_url(sandbox_id, "/files"), params={"path": path})
+    response = httpx.get(sandbox_manager_url(sandbox_id, "/files"), params={"path": path})
     if response.status_code == 404:
         raise FileNotFoundError(f"{sandbox_id}:{path}")
     response.raise_for_status()
@@ -827,7 +827,7 @@ def read_file(sandbox_id: str, path: str) -> str:
 def write_file(sandbox_id: str, path: str, content: str) -> None:
     """Write content to a file inside the sandbox, creating parent folders if needed."""
     response = httpx.put(
-        guest_agent_url(sandbox_id, "/files"),
+        sandbox_manager_url(sandbox_id, "/files"),
         params={"path": path},
         content=content.encode(),
     )

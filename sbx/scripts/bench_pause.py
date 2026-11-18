@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure how long pause and resume take at different VM memory sizes (Track C, for Track B's grace period).
 
-Calls node_agent directly, because the API doesn't pass the timings back. Run on the host, from sbx/:
+Calls host_manager directly, because the API doesn't pass the timings back. Run on the host, from sbx/:
 
     sudo .venv/bin/python scripts/bench_pause.py                    # 512/1024/2048 MiB, 3 runs each
     sudo .venv/bin/python scripts/bench_pause.py --cold             # drop the host's file cache before each resume
@@ -20,9 +20,9 @@ import statistics
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # so `import node_agent` works
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # so `import host_manager` works
 
-import node_agent
+import host_manager
 
 
 FILL_MARKER = "/tmp/bench_filled"   # the filler writes this once its memory is allocated
@@ -44,9 +44,9 @@ def filler_command(mib: int) -> str:
 
 def fill_memory(sandbox_id: str, mib: int) -> int:
     """Start the filler in the guest, wait until its memory is allocated, and return its PID."""
-    pid = node_agent.exec(sandbox_id, filler_command(mib), background=True)["pid"]
-    node_agent.wait_until(
-        lambda: node_agent.exec(sandbox_id, f"test -f {FILL_MARKER}", timeout=10)["exit_code"] == 0,
+    pid = host_manager.exec(sandbox_id, filler_command(mib), background=True)["pid"]
+    host_manager.wait_until(
+        lambda: host_manager.exec(sandbox_id, f"test -f {FILL_MARKER}", timeout=10)["exit_code"] == 0,
         timeout=FILL_WAIT_TIMEOUT, interval=0.5,
         waiting_for=f"the filler to allocate {mib} MiB in {sandbox_id}",
     )
@@ -55,7 +55,7 @@ def fill_memory(sandbox_id: str, mib: int) -> int:
 
 def process_alive(sandbox_id: str, pid: int) -> bool:
     """Return True if the guest process is still running."""
-    return node_agent.exec(sandbox_id, f"kill -0 {pid}", timeout=10)["exit_code"] == 0
+    return host_manager.exec(sandbox_id, f"kill -0 {pid}", timeout=10)["exit_code"] == 0
 
 
 def drop_host_cache() -> None:
@@ -74,18 +74,18 @@ def timed_call(step):
 
 def measure_one(size_mib: int, fill_fraction: float, cold: bool) -> dict:
     """Create a sandbox at size_mib, pause and resume it once, destroy it, and return every timing."""
-    node_agent.MEMORY_MIB = size_mib   # read at boot and by the snapshot size check
-    sandbox = node_agent.create_sandbox()
+    host_manager.MEMORY_MIB = size_mib   # read at boot and by the snapshot size check
+    sandbox = host_manager.create_sandbox()
     try:
         filler_pid = fill_memory(sandbox.id, int(size_mib * fill_fraction)) if fill_fraction > 0 else None
-        pause, pause_total = timed_call(lambda: node_agent.pause_sandbox(sandbox.id))
-        mem_file_mib = os.path.getsize(node_agent.mem_path(sandbox.id)) / node_agent.BYTES_PER_MIB
+        pause, pause_total = timed_call(lambda: host_manager.pause_sandbox(sandbox.id))
+        mem_file_mib = os.path.getsize(host_manager.mem_path(sandbox.id)) / host_manager.BYTES_PER_MIB
         if cold:
             drop_host_cache()
-        resume, resume_total = timed_call(lambda: node_agent.resume_sandbox(sandbox.id))
+        resume, resume_total = timed_call(lambda: host_manager.resume_sandbox(sandbox.id))
         survived = filler_pid is None or process_alive(sandbox.id, filler_pid)
     finally:
-        node_agent.destroy_sandbox(sandbox.id)
+        host_manager.destroy_sandbox(sandbox.id)
     return {
         "size_mib": size_mib, **{k: pause[k] for k in PAUSE_PARTS}, "pause_total_s": pause_total,
         **{k: resume[k] for k in RESUME_PARTS}, "resume_total_s": resume_total,
@@ -120,7 +120,7 @@ def report(results: dict[int, list[dict]], args: argparse.Namespace) -> str:
     lost = [r for runs in results.values() for r in runs if not r["filler_survived"]]
     lines = [
         "# Pause/resume timings", "",
-        f"Medians of {args.runs} runs per size, in seconds. vCPUs: {node_agent.VCPU_COUNT}. "
+        f"Medians of {args.runs} runs per size, in seconds. vCPUs: {host_manager.VCPU_COUNT}. "
         f"RAM filled before pause: {args.fill:.0%}. Host file cache before resume: "
         f"{'dropped (cold)' if args.cold else 'kept (warm)'}.", "",
         markdown_table(results), "",

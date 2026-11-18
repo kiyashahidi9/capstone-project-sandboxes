@@ -9,7 +9,7 @@ import httpx
 from fastapi import HTTPException
 
 import locks
-import node_agent
+import host_manager
 from api import db
 from runner import runner
 from api.models import (
@@ -97,11 +97,11 @@ def require_turn(sandbox_id: str) -> None:
 # Creating a sandbox
 # ---------------------------------------------------------------------------
 
-def boot_sandbox(sandbox_id: str) -> node_agent.Sandbox:
+def boot_sandbox(sandbox_id: str) -> host_manager.Sandbox:
     """Starts the VM for a recorded sandbox, or marks it destroyed and answers 503 (host full) or 500."""
     try:
-        return node_agent.create_sandbox(sandbox_id)
-    except node_agent.NoFreeSlotsError as error:
+        return host_manager.create_sandbox(sandbox_id)
+    except host_manager.NoFreeSlotsError as error:
         db.set_state(sandbox_id, SandboxState.DESTROYED)
         raise HTTPException(status_code=HTTP_SERVICE_UNAVAILABLE, detail="No sandbox slots available") from error
     except Exception as error:
@@ -137,7 +137,7 @@ def is_destroyed(row: SandboxRow) -> bool:
 
 def tear_down(sandbox_id: str) -> None:
     """Removes a sandbox from the host, then records it as destroyed."""
-    node_agent.destroy_sandbox(sandbox_id)
+    host_manager.destroy_sandbox(sandbox_id)
     db.set_state(sandbox_id, SandboxState.DESTROYED)
 
 
@@ -167,7 +167,7 @@ def pause(sandbox_id: str) -> SandboxRow:
 def save_snapshot(sandbox_id: str) -> None:
     """Writes the VM to snapshot files; if that fails, records where it really ended up and answers 500."""
     try:
-        node_agent.pause_sandbox(sandbox_id)
+        host_manager.pause_sandbox(sandbox_id)
     except Exception as error:
         settle_pausing(sandbox_id)
         raise HTTPException(status_code=HTTP_SERVER_ERROR, detail=PAUSE_FAILED) from error
@@ -178,7 +178,7 @@ def mark_paused(sandbox_id: str) -> None:
     """Records a pausing sandbox as paused, with where its snapshot is and when it paused."""
     db.transition(
         sandbox_id, [SandboxState.PAUSING], SandboxState.PAUSED,
-        snapshot_dir=node_agent.snapshot_dir(sandbox_id), paused_at=db.now(),
+        snapshot_dir=host_manager.snapshot_dir(sandbox_id), paused_at=db.now(),
     )
 
 
@@ -218,7 +218,7 @@ def resume_locked(sandbox_id: str) -> None:
     if not db.transition(sandbox_id, [SandboxState.PAUSED], SandboxState.RESUMING):
         raise conflict(NOT_PAUSED)
     try:
-        node_agent.resume_sandbox(sandbox_id)
+        host_manager.resume_sandbox(sandbox_id)
     except Exception as error:
         settle_resuming(sandbox_id)
         raise HTTPException(status_code=HTTP_SERVER_ERROR, detail=RESUME_FAILED) from error
@@ -236,14 +236,14 @@ def mark_resumed(sandbox_id: str) -> None:
 
 def vm_answers(sandbox_id: str) -> bool:
     """Checks the VM's process is alive and the program inside it replies."""
-    return node_agent.is_sandbox_running(sandbox_id) and node_agent.guest_agent_is_healthy(sandbox_id)
+    return host_manager.is_sandbox_running(sandbox_id) and host_manager.sandbox_manager_is_healthy(sandbox_id)
 
 
 def snapshot_is_complete(sandbox_id: str) -> bool:
     """Checks every file needed to resume is there, with the memory file at full size."""
     try:
-        node_agent.require_resumable_files(sandbox_id)
-        node_agent.check_snapshot_files(sandbox_id)
+        host_manager.require_resumable_files(sandbox_id)
+        host_manager.check_snapshot_files(sandbox_id)
     except (FileNotFoundError, RuntimeError):
         return False
     return True
@@ -252,20 +252,20 @@ def snapshot_is_complete(sandbox_id: str) -> bool:
 def try_unfreeze(sandbox_id: str) -> None:
     """Restarts a frozen VM's CPUs if its Firecracker is still there; does nothing otherwise."""
     try:
-        with node_agent.firecracker_client(sandbox_id) as client:
-            node_agent.unfreeze_vm(client)
+        with host_manager.firecracker_client(sandbox_id) as client:
+            host_manager.unfreeze_vm(client)
     except Exception:
         pass   # not frozen, or Firecracker is gone: vm_answers() decides what happens next
 
 
 def settle_pausing(sandbox_id: str) -> None:
     """Records where an unfinished pause really left a sandbox: running, paused, or gone."""
-    if node_agent.is_sandbox_running(sandbox_id):
+    if host_manager.is_sandbox_running(sandbox_id):
         try_unfreeze(sandbox_id)       # a pause can stop between freezing the VM and saving it
         if vm_answers(sandbox_id):
             db.transition(sandbox_id, [SandboxState.PAUSING], SandboxState.RUNNING)
             return
-        node_agent.kill_firecracker(sandbox_id)   # alive but stuck: let the snapshot decide
+        host_manager.kill_firecracker(sandbox_id)   # alive but stuck: let the snapshot decide
     if snapshot_is_complete(sandbox_id):
         mark_paused(sandbox_id)
         return
@@ -277,7 +277,7 @@ def settle_resuming(sandbox_id: str) -> None:
     if vm_answers(sandbox_id):
         mark_resumed(sandbox_id)
         return
-    node_agent.kill_firecracker(sandbox_id)   # half-loaded VM; snap/ stays, so a later resume can retry
+    host_manager.kill_firecracker(sandbox_id)   # half-loaded VM; snap/ stays, so a later resume can retry
     db.transition(sandbox_id, [SandboxState.RESUMING], SandboxState.PAUSED)
 
 
@@ -303,7 +303,7 @@ def is_gone(row: SandboxRow) -> bool:
         return True   # a crash cut off the create, so nobody was ever given this ID
     if row.state == SandboxState.PAUSED:
         return not snapshot_is_complete(row.id)   # no VM on purpose: only a broken snapshot means it's lost
-    return not node_agent.is_sandbox_running(row.id)
+    return not host_manager.is_sandbox_running(row.id)
 
 
 def run_logging_failure(step: Callable[[str], None], sandbox_id: str) -> None:
@@ -324,9 +324,9 @@ def destroy_gone_sandboxes() -> None:
 def destroy_untracked_sandboxes() -> None:
     """Removes every sandbox left on the host that no live row keeps track of."""
     live_ids = {row.id for row in db.list_live_sandboxes()}
-    for sandbox_id in node_agent.list_host_sandboxes():
+    for sandbox_id in host_manager.list_host_sandboxes():
         if sandbox_id not in live_ids:
-            run_logging_failure(node_agent.destroy_sandbox, sandbox_id)
+            run_logging_failure(host_manager.destroy_sandbox, sandbox_id)
 
 
 def clean_up_after_restart() -> None:
@@ -336,7 +336,7 @@ def clean_up_after_restart() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Talking to the sandbox manager (guest_agent/)
+# Talking to the sandbox manager (sandbox_manager/)
 # ---------------------------------------------------------------------------
 
 def guest_error_to_http(error: httpx.HTTPStatusError) -> HTTPException:
@@ -357,7 +357,7 @@ def guest_error_to_http(error: httpx.HTTPStatusError) -> HTTPException:
 def run_command(sandbox_id: str, request: ExecuteRequest) -> dict:
     """Runs a command inside the sandbox and gives back the sandbox manager's raw answer."""
     try:
-        return node_agent.exec(
+        return host_manager.exec(
             sandbox_id,
             request.cmd,
             cwd=request.cwd,
@@ -383,7 +383,7 @@ def to_background_response(result: dict) -> ExecuteBackgroundResponse:
 def fetch_file(sandbox_id: str, path: str) -> str:
     """Reads a file from inside the sandbox, or answers 404 if it isn't there."""
     try:
-        return node_agent.read_file(sandbox_id, path)
+        return host_manager.read_file(sandbox_id, path)
     except FileNotFoundError as error:
         raise HTTPException(status_code=HTTP_NOT_FOUND, detail=f"no such file: {path}") from error
     except httpx.HTTPStatusError as error:
@@ -403,7 +403,7 @@ def text_from_body(raw: bytes) -> str:
 def store_file(sandbox_id: str, path: str, content: str) -> None:
     """Saves text to a file inside a running sandbox."""
     try:
-        node_agent.write_file(sandbox_id, path, content)
+        host_manager.write_file(sandbox_id, path, content)
     except httpx.HTTPStatusError as error:
         raise guest_error_to_http(error) from error
     except httpx.RequestError as error:

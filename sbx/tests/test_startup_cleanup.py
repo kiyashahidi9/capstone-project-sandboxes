@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-import node_agent
+import host_manager
 from api import db, helpers
 from api.main import app
 from api.models import SandboxState
@@ -40,13 +40,13 @@ def host(monkeypatch):
         if sandbox_id not in fake.snapshot_ok:
             raise FileNotFoundError("no snapshot")
 
-    monkeypatch.setattr(node_agent, "list_host_sandboxes", lambda: sorted(fake.on_host))
-    monkeypatch.setattr(node_agent, "is_sandbox_running", lambda sandbox_id: sandbox_id in fake.vm_up)
-    monkeypatch.setattr(node_agent, "guest_agent_is_healthy", lambda sandbox_id: sandbox_id in fake.vm_up)
-    monkeypatch.setattr(node_agent, "require_resumable_files", require_resumable_files)
-    monkeypatch.setattr(node_agent, "check_snapshot_files", lambda sandbox_id: None)
-    monkeypatch.setattr(node_agent, "kill_firecracker", lambda sandbox_id: fake.vm_up.discard(sandbox_id))
-    monkeypatch.setattr(node_agent, "destroy_sandbox", destroy_sandbox)
+    monkeypatch.setattr(host_manager, "list_host_sandboxes", lambda: sorted(fake.on_host))
+    monkeypatch.setattr(host_manager, "is_sandbox_running", lambda sandbox_id: sandbox_id in fake.vm_up)
+    monkeypatch.setattr(host_manager, "sandbox_manager_is_healthy", lambda sandbox_id: sandbox_id in fake.vm_up)
+    monkeypatch.setattr(host_manager, "require_resumable_files", require_resumable_files)
+    monkeypatch.setattr(host_manager, "check_snapshot_files", lambda sandbox_id: None)
+    monkeypatch.setattr(host_manager, "kill_firecracker", lambda sandbox_id: fake.vm_up.discard(sandbox_id))
+    monkeypatch.setattr(host_manager, "destroy_sandbox", destroy_sandbox)
     monkeypatch.setattr(helpers, "try_unfreeze", lambda sandbox_id: None)
     return fake
 
@@ -192,4 +192,4 @@ def test_server_start_destroys_a_sandbox_whose_vm_died(host):
 
 def test_unit_tests_never_point_at_the_real_sandbox_folder():
     """Guards conftest.py: with the real /var/sbx, sudo pytest on the host would destroy real sandboxes."""
-    assert node_agent.SANDBOXES_ROOT != "/var/sbx"
+    assert host_manager.SANDBOXES_ROOT != "/var/sbx"

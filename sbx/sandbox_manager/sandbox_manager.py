@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sandbox manager (guest_agent/): runs inside each sandbox and runs commands, handles files, flushes the disk and sets the clock."""
+"""Sandbox manager (sandbox_manager/): runs inside each sandbox and runs commands, handles files, flushes the disk and sets the clock."""
 import json
 import os
 import time
@@ -26,7 +26,7 @@ class BadRequest(Exception):
 ## REQUEST HANDLER ##
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "guest-agent/1"
+    server_version = "sandbox-manager/1"
 
     # endpoints
 

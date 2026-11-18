@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 
-import node_agent
+import host_manager
 from api import db
 from api.auth import require_admin, require_admin_key_set, require_admin_or_turn
 from api.helpers import (
@@ -86,7 +86,7 @@ app = FastAPI(title="sbx", lifespan=lifespan)
 )
 def create_sandbox() -> CreateSandboxResponse:
     """Makes a brand-new sandbox and tells the client how to reach it."""
-    sandbox_id = node_agent.new_sandbox_id()
+    sandbox_id = host_manager.new_sandbox_id()
     db.insert_sandbox(sandbox_id)
     sandbox = boot_sandbox(sandbox_id)
     db.set_state(sandbox_id, SandboxState.RUNNING)

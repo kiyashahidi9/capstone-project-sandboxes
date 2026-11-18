@@ -2,7 +2,7 @@
 
 PRAGMA journal_mode = WAL;   -- reads don't wait for writes
 
--- Which sandbox holds which network slot; owned by node_agent.py and must match its SLOTS_SCHEMA.
+-- Which sandbox holds which network slot; owned by host_manager.py and must match its SLOTS_SCHEMA.
 CREATE TABLE IF NOT EXISTS slots (
     n           INTEGER PRIMARY KEY CHECK (n BETWEEN 1 AND 250),  -- slot number, one row per taken slot
     sandbox_id  TEXT NOT NULL UNIQUE                              -- a sandbox holds at most one slot

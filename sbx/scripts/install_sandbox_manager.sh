@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# install_guest_agent.sh - bake the sandbox manager (guest_agent/) into the base image (Milestone 1e)
+# install_sandbox_manager.sh - bake the sandbox manager (sandbox_manager/) into the base image (Milestone 1e)
 #
-# The sandbox manager (guest_agent/guest_agent.py) is a small HTTP server inside every VM
+# The sandbox manager (sandbox_manager/sandbox_manager.py) is a small HTTP server inside every VM
 # on port 49983. The host uses it to run commands and read/write files in the VM.
 #
 # install does:
 #   1. Checks the agent's .py files parse (on the host) and that the image has python3.
-#   2. Mounts ~/fc/rootfs.ext4 and copies the agent's files to /opt/guest_agent/.
-#   3. Writes guest-agent.service: at boot it sets the VM's network
+#   2. Mounts ~/fc/rootfs.ext4 and copies the agent's files to /opt/sandbox_manager/.
+#   3. Writes sandbox-manager.service: at boot it sets the VM's network
 #      (172.16.0.2/30, eth0 up, default via 172.16.0.1), then runs the agent.
 #   4. Enables the service at boot and unmounts (always, even on error).
 #
 # Usage:
-#   sudo install_guest_agent.sh           install (rerun whenever guest_agent/ changes)
-#   sudo install_guest_agent.sh verify    checklist: is the image up to date?
-#   install_guest_agent.sh test N         checklist: does the agent work in running VM N?
+#   sudo install_sandbox_manager.sh           install (rerun whenever sandbox_manager/ changes)
+#   sudo install_sandbox_manager.sh verify    checklist: is the image up to date?
+#   install_sandbox_manager.sh test N         checklist: does the agent work in running VM N?
 #                                         (AGENT_URL=http://host:port overrides the address)
 #
 # VMs boot from copies (~/fc/vmN.ext4), not rootfs.ext4. Copies made before an install
@@ -28,36 +28,42 @@
 # if it prints something: sudo umount /mnt/rootfs
 
 # 1. Bake the sandbox manager into the base image, then check it
-  # chmod +x scripts/install_guest_agent.sh
-  # sudo scripts/install_guest_agent.sh
-  # sudo scripts/install_guest_agent.sh verify
+  # chmod +x scripts/install_sandbox_manager.sh
+  # sudo scripts/install_sandbox_manager.sh
+  # sudo scripts/install_sandbox_manager.sh verify
 
 # 2. Boot a fresh VM from the updated image
   # sudo scripts/netns.sh start 1
 
 # 3. Test the agent from the host
-  # scripts/install_guest_agent.sh test 1
+  # scripts/install_sandbox_manager.sh test 1
 
 
 set -Eeuo pipefail
 
 readonly PORT=49983
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-readonly AGENT_SRC_DIR=$REPO/guest_agent
-readonly AGENT_FILES=(guest_agent.py helpers.py agent_types.py)   # everything the agent needs at runtime
+readonly AGENT_SRC_DIR=$REPO/sandbox_manager
+readonly AGENT_FILES=(sandbox_manager.py helpers.py agent_types.py)   # everything the agent needs at runtime
 REAL_HOME=$(getent passwd "${SUDO_USER:-$(id -un)}" | cut -d: -f6)   # under sudo, $HOME is /root
 FC_DIR=${FC_DIR:-$REAL_HOME/fc}
 readonly ROOTFS=$FC_DIR/rootfs.ext4
 
 # Paths inside the image
-readonly AGENT_DST_DIR=/opt/guest_agent
-readonly AGENT_DST=$AGENT_DST_DIR/guest_agent.py   # the entry point the service runs
-readonly UNIT=/etc/systemd/system/guest-agent.service
-readonly UNIT_LINK=/etc/systemd/system/multi-user.target.wants/guest-agent.service
+readonly AGENT_DST_DIR=/opt/sandbox_manager
+readonly AGENT_DST=$AGENT_DST_DIR/sandbox_manager.py   # the entry point the service runs
+readonly UNIT=/etc/systemd/system/sandbox-manager.service
+readonly UNIT_LINK=/etc/systemd/system/multi-user.target.wants/sandbox-manager.service
+
+# The same program under its old name (the guest agent, renamed to sandbox manager).
+# Images installed before the rename still have it enabled; both would fight over port 49983.
+readonly OLD_DST_DIR=/opt/guest_agent
+readonly OLD_UNIT=/etc/systemd/system/guest-agent.service
+readonly OLD_UNIT_LINK=/etc/systemd/system/multi-user.target.wants/guest-agent.service
 
 read -r -d '' SERVICE <<EOF || true
 [Unit]
-Description=Sandbox guest agent
+Description=Sandbox manager (runs commands and handles files for the host)
 After=network.target
 
 [Service]
@@ -92,6 +98,10 @@ unmount_rootfs() {
   rmdir "$MNT"
   MNT=""
 }
+# deletes the pre-rename guest agent from the mounted image, so only one server starts at boot
+remove_old_agent() { rm -rf "$MNT$OLD_DST_DIR"; rm -f "$MNT$OLD_UNIT" "$MNT$OLD_UNIT_LINK"; }
+# succeeds when the mounted image has no trace of the pre-rename guest agent
+old_agent_gone()   { [[ ! -e $MNT$OLD_DST_DIR && ! -e $MNT$OLD_UNIT && ! -L $MNT$OLD_UNIT_LINK ]]; }
 image_has_python() { [[ -L $MNT/usr/bin/python3 || -x $MNT/usr/bin/python3 ]]; }
 
 # ---------------------------------------------------------------- install
@@ -108,6 +118,9 @@ cmd_install() {
   log "   mounting $ROOTFS"
   mount_rootfs rw
   image_has_python || die "image has no /usr/bin/python3"
+
+  log "   removing the old guest agent (renamed to sandbox manager), if present"
+  remove_old_agent
 
   log "2. copying agent -> $AGENT_DST_DIR/"
   for f in "${AGENT_FILES[@]}"; do
@@ -159,6 +172,7 @@ cmd_verify() {
   done
   check "service file is up to date"           service_matches
   check "service enabled at boot"              test -L "$MNT$UNIT_LINK"
+  check "old guest agent removed"              old_agent_gone
   local copy
   for copy in "$FC_DIR"/vm*.ext4; do
     [[ -e $copy ]] || continue

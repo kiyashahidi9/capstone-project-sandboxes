@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create the network for sandbox slot N (Build Plan 1d). Called by node_agent.create_network().
+# Create the network for sandbox slot N (Build Plan 1d). Called by host_manager.create_network().
 #
 #   sudo scripts/netns_create.sh N
 #

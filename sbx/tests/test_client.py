@@ -10,7 +10,7 @@ from contextlib import closing
 import pytest
 from fastapi.testclient import TestClient
 
-import node_agent
+import host_manager
 from api import db
 from api.main import app
 from api.models import SandboxState
@@ -45,14 +45,14 @@ def api(tmp_path, monkeypatch):
     def boot(sandbox_id=None):
         with closing(db.connect()) as conn:
             conn.execute("INSERT INTO slots (n, sandbox_id) VALUES (4, ?)", (sandbox_id,))
-        return node_agent.Sandbox(id=sandbox_id, n=4, ip=node_agent.guest_ip_for(4), pid=10, boot_seconds=0.1)
+        return host_manager.Sandbox(id=sandbox_id, n=4, ip=host_manager.guest_ip_for(4), pid=10, boot_seconds=0.1)
 
     def destroy(sandbox_id):
         with closing(db.connect()) as conn:
             conn.execute("DELETE FROM slots WHERE sandbox_id = ?", (sandbox_id,))
 
-    monkeypatch.setattr(node_agent, "create_sandbox", boot)
-    monkeypatch.setattr(node_agent, "destroy_sandbox", destroy)
+    monkeypatch.setattr(host_manager, "create_sandbox", boot)
+    monkeypatch.setattr(host_manager, "destroy_sandbox", destroy)
 
     # a fake agent
     script = tmp_path / "agent.py"

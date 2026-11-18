@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import locks
-import node_agent
+import host_manager
 from api import db, helpers
 from api.main import app
 from api.models import SandboxState
@@ -70,14 +70,14 @@ def host(monkeypatch):
         fake.calls.append("destroy")
         fake.alive = False
 
-    monkeypatch.setattr(node_agent, "pause_sandbox", pause_sandbox)
-    monkeypatch.setattr(node_agent, "resume_sandbox", resume_sandbox)
-    monkeypatch.setattr(node_agent, "is_sandbox_running", lambda sandbox_id: fake.alive)
-    monkeypatch.setattr(node_agent, "guest_agent_is_healthy", lambda sandbox_id: fake.healthy)
-    monkeypatch.setattr(node_agent, "require_resumable_files", require_resumable_files)
-    monkeypatch.setattr(node_agent, "check_snapshot_files", lambda sandbox_id: None)
-    monkeypatch.setattr(node_agent, "kill_firecracker", kill_firecracker)
-    monkeypatch.setattr(node_agent, "destroy_sandbox", destroy_sandbox)
+    monkeypatch.setattr(host_manager, "pause_sandbox", pause_sandbox)
+    monkeypatch.setattr(host_manager, "resume_sandbox", resume_sandbox)
+    monkeypatch.setattr(host_manager, "is_sandbox_running", lambda sandbox_id: fake.alive)
+    monkeypatch.setattr(host_manager, "sandbox_manager_is_healthy", lambda sandbox_id: fake.healthy)
+    monkeypatch.setattr(host_manager, "require_resumable_files", require_resumable_files)
+    monkeypatch.setattr(host_manager, "check_snapshot_files", lambda sandbox_id: None)
+    monkeypatch.setattr(host_manager, "kill_firecracker", kill_firecracker)
+    monkeypatch.setattr(host_manager, "destroy_sandbox", destroy_sandbox)
     monkeypatch.setattr(helpers, "try_unfreeze", lambda sandbox_id: fake.calls.append("unfreeze"))
     monkeypatch.setattr(runner, "stop_turn", lambda sandbox_id: fake.calls.append("stop_turn"))
     return fake
@@ -182,7 +182,7 @@ def test_pause_records_the_snapshot_folder(client, host):
 
     client.post(f"/sandboxes/{ID}/pause")
 
-    assert db.get_sandbox(ID).snapshot_dir == node_agent.snapshot_dir(ID)
+    assert db.get_sandbox(ID).snapshot_dir == host_manager.snapshot_dir(ID)
 
 
 @pytest.mark.parametrize("state, action", [
@@ -304,7 +304,7 @@ def test_failed_resume_stays_paused(client, host):
 def test_exec_on_a_paused_sandbox_resumes_it_first(client, host, monkeypatch):
     make_sandbox(SandboxState.RUNNING)
     client.post(f"/sandboxes/{ID}/pause")
-    monkeypatch.setattr(node_agent, "exec", lambda *args, **kwargs: host.calls.append("exec") or {
+    monkeypatch.setattr(host_manager, "exec", lambda *args, **kwargs: host.calls.append("exec") or {
         "exit_code": 0, "stdout": "", "stderr": "", "timed_out": False,
     })
 
@@ -318,8 +318,8 @@ def test_exec_on_a_paused_sandbox_resumes_it_first(client, host, monkeypatch):
 def test_file_calls_on_a_paused_sandbox_resume_it_first(client, host, monkeypatch):
     make_sandbox(SandboxState.RUNNING)
     client.post(f"/sandboxes/{ID}/pause")
-    monkeypatch.setattr(node_agent, "write_file", lambda sandbox_id, path, content: host.calls.append("write"))
-    monkeypatch.setattr(node_agent, "read_file", lambda sandbox_id, path: "hi")
+    monkeypatch.setattr(host_manager, "write_file", lambda sandbox_id, path, content: host.calls.append("write"))
+    monkeypatch.setattr(host_manager, "read_file", lambda sandbox_id, path: "hi")
 
     written = client.put(f"/sandboxes/{ID}/files", params={"path": "/root/a"}, content=b"hi")
     client.post(f"/sandboxes/{ID}/pause")

@@ -16,7 +16,7 @@
 # Packet flow:
 #   host -> 10.201.0.N -> vethNh => vethNn [DNAT -> 172.16.0.2] -> tap0 -> guest
 #   guest -> tap0 [SNAT 172.16.0.2 -> 10.201.0.N] -> vethNn => vethNh -> MASQUERADE -> internet
-#      (the guest-agent service in the image sets "default via 172.16.0.1" at boot)
+#      (the sandbox-manager service in the image sets "default via 172.16.0.1" at boot)
 #
 # Create steps (one function each below):
 #   1. namespace sbxN, loopback up
@@ -189,10 +189,10 @@ cmd_start() {
   fc_put /network-interfaces/eth0 "{\"iface_id\":\"eth0\",\"guest_mac\":\"$GUEST_MAC\",\"host_dev_name\":\"$TAP\"}"
   fc_put /actions '{"action_type":"InstanceStart"}'
 
-    log "waiting for the sandbox manager (guest_agent/) on $CLONE_IP:49983"
+    log "waiting for the sandbox manager (sandbox_manager/) on $CLONE_IP:49983"
     for i in $(seq 1 60); do curl -sf --max-time 1 "http://$CLONE_IP:49983/health" >/dev/null && break; sleep 1; done
     curl -sf --max-time 2 "http://$CLONE_IP:49983/health" >/dev/null \
-      || die "sandbox manager never answered (disk older than install_guest_agent.sh? remove $disk). See $console"
+      || die "sandbox manager never answered (disk older than install_sandbox_manager.sh? remove $disk). See $console"
 
   log "VM $N is up:  ssh -i $FC_DIR/vm_key root@$CLONE_IP"
 }

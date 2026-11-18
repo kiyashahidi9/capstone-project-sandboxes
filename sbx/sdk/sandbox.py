@@ -92,7 +92,7 @@ class Sandbox:
     - 404: No sandbox exists with this id.
     - 409: The sandbox is in the wrong state for this call, e.g. it has been
       destroyed, or you paused a sandbox that is already paused.
-    - 502: The API could not reach the sandbox manager (guest_agent/) inside the VM.
+    - 502: The API could not reach the sandbox manager (sandbox_manager/) inside the VM.
 
     If the API itself cannot be reached, httpx exceptions such as
     `httpx.ConnectError` and `httpx.TimeoutException` are raised unchanged.
