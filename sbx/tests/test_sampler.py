@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from control.sampler import poll
+from control.heartbeat import poll
 from tools.replay import replay
 from control.types import Policy, SessionFixture, VmSample, VmState
 

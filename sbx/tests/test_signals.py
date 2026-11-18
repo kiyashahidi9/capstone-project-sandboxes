@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from control.signals import get_observation_window
+from control.heartbeat import get_observation_window
 from control.types import AgentEvent, EventType, Policy, VmSample, VmState
 
 

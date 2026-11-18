@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -44,6 +45,8 @@ from api.models import (
     SandboxListResponse,
     SandboxState,
 )
+from control.live import SampleMemory
+from control.heartbeat import run_until_stopped
 from runner import runner
 
 
@@ -66,7 +69,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     db.create_tables()
     runner.recover_interrupted_turns()
     recover_interrupted_changes()
-    yield
+    stop = threading.Event()
+    memory = SampleMemory()
+    beat = threading.Thread(
+        target=run_until_stopped,
+        args=(memory, stop),
+        name="sbx-beat",
+        daemon=True,
+    )
+    app.state.beat_stop = stop
+    app.state.beat_memory = memory
+    app.state.beat_thread = beat
+    beat.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        beat.join(timeout=2)
 
 
 app = FastAPI(title="sbx", lifespan=lifespan)

@@ -19,7 +19,7 @@ from api.models import EventType as StoredEvent
 from api.models import SandboxRow, SandboxState
 from control.classifier import classify
 from control.decider import decide
-from control.signals import get_observation_window
+from control.heartbeat import get_observation_window
 from control.types import Activity, AgentEvent, Decision, EventType, Policy, VmSample, VmState
 
 

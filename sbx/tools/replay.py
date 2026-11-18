@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from pydantic import AwareDatetime
 
-from control.sampler import poll
+from control.heartbeat import poll
 from control.types import VmSample
 
 

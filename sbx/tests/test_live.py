@@ -6,7 +6,6 @@ import node_agent
 from api import db
 from api.models import EventType, SandboxState
 from control.live import SampleMemory, judge_live, judge_sandbox
-from control.polling_cron_job import tick
 from control.types import Activity, Decision, VmState
 
 
@@ -82,4 +81,3 @@ def test_a_destroyed_sandbox_is_skipped(tmp_path, monkeypatch):
     db.set_state(ID, SandboxState.DESTROYED)
 
     assert judge_live(SampleMemory(), datetime.now(UTC)) == []
-    assert tick(SampleMemory(), datetime.now(UTC)) == []
