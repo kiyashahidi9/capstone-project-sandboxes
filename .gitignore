@@ -4,11 +4,6 @@
 !/.gitignore
 !/.githooks/
 
-# Understand-Anything scratch output (the knowledge graph itself is committed)
-.ua/intermediate/
-.ua/diff-overlay.json
-.ua/.trash-*/
-
 # Local SQLite databases (e.g. dev-state.db built from sbx/db/seed.sql)
 *.db
 *.db-wal
@@ -17,4 +12,3 @@
 __pycache__
 .venv
 .DS_Store
-1G-SETUP-README.md

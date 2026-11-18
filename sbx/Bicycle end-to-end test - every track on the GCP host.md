@@ -40,13 +40,13 @@ cd sbx
 sudo scripts/setup_host.sh          # rebuilds the base image with the sandbox manager
 sudo scripts/setup_agents.sh
 pgrep -a firecracker; ip netns list; pgrep -af uvicorn
-.venv/bin/pytest -q
+sudo .venv/bin/pytest -q            # sudo: .env is root only, and the real Firecracker tests need root
 ```
 
 - [ ] Both setup scripts show every line `[x]`, including `sandbox manager in the base image`.
 - [ ] If `setup_host.sh` prints `these VM disks were made before this install`, run the `rm` it suggests.
 - [ ] `pgrep` and `ip netns list` print nothing.
-- [ ] pytest shows no `failed`.
+- [ ] pytest shows no `failed` and no `skipped`.
 
 **Laptop:**
 
@@ -98,7 +98,7 @@ curl -s -H "Authorization: Bearer wrong" $API/sandboxes; echo   # {"detail":"Inv
 
 A=$(api -X POST $API/sandboxes | jq -r .id)
 B=$(api -X POST $API/sandboxes | jq -r .id)
-api $API/sandboxes | jq -c '.sandboxes[] | {id, state, ip}'     # A and B running, different IPs
+api $API/sandboxes | jq -c '.sandboxes[] | select(.state != "destroyed") | {id, state, ip}'   # A and B running, different IPs
 
 ID=$A
 run 'whoami'                                 # root
@@ -217,7 +217,7 @@ IP=$(api $API/sandboxes/$ID | jq -r .ip)
 **Laptop**, at the `>` prompt:
 
 ```
-Clone https://github.com/kiyashahidi9/example-express-app into /root/app, install dependencies, start the dev server in the background on port 3000, and add a /health route that returns ok.
+Clone https://github.com/kiyashahidi9/example-express-app into /root/app, install dependencies, start the dev server in the background on port 3000, and add a /hello route that returns hello.
 ```
 
 - [ ] The chat prints `[run]`, `[read]` and `[write]` steps and ends with `done`.
@@ -227,7 +227,8 @@ Clone https://github.com/kiyashahidi9/example-express-app into /root/app, instal
 ```bash
 api $API/sandboxes/$ID/events | jq -r '.events[].type' | sort | uniq -c   # user_message, turn_started, agent_output, turn_finished
 state                                                                     # "turn_state":"idle"
-curl -s http://$IP:3000/health; echo                                      # ok
+curl -s http://$IP:3000/hello; echo                                       # hello
+curl -s http://$IP:3000/health; echo                                      # {"ok":true} (the app already has it)
 ```
 
 - [ ] Every line prints what its comment says.
