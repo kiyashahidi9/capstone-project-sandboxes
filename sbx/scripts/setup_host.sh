@@ -84,8 +84,10 @@ grep -l $'\r' "$SCRIPTS"/*.sh 2>/dev/null | xargs -r sed -i 's/\r$//' || true
 chmod +x "$SCRIPTS"/*.sh
 
 log "2. host packages"
+# never stop to ask: keep any config file that was already changed (also used for the base image below)
+APT_KEEP_CONFIGS="-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $APT_KEEP_CONFIGS \
   curl wget jq git squashfs-tools e2fsprogs iproute2 iptables \
   python3 cpu-checker
 
@@ -157,7 +159,7 @@ else
   mount --bind /dev "$ROOT/dev"
   mkdir -p "$ROOT/dev/pts" && mount --bind /dev/pts "$ROOT/dev/pts"
   chroot "$ROOT" /bin/bash -c "apt-get update -qq \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 git curl nodejs npm \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $APT_KEEP_CONFIGS python3 git curl nodejs npm \
     && apt-get clean && rm -rf /var/lib/apt/lists/*"
   unmount_chroot
   rm -f "$ROOT/usr/sbin/policy-rc.d"
