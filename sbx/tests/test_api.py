@@ -1,5 +1,7 @@
+import json
 import re
 import threading
+import time
 from contextlib import closing
 
 import httpx
@@ -8,7 +10,7 @@ from fastapi.testclient import TestClient
 
 import host_manager
 from api import auth, db
-from api.main import app
+from api.main import app, iter_event_lines
 from api.models import CreateSandboxResponse, EventType, SandboxState, TurnState
 from runner import runner
 
@@ -827,6 +829,61 @@ def test_events_reject_a_negative_after(client, monkeypatch):
     assert response.status_code == 422
 
 
+def stream_lines(response) -> list[dict]:
+    """The JSON events in a finished event stream."""
+    return [json.loads(line) for line in response.iter_lines() if line]
+
+
+def test_the_stream_sends_the_backlog_then_ends_when_destroyed(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    db.append_event(sandbox_id, EventType.USER_MESSAGE, {"text": "hi"})
+    db.append_event(sandbox_id, EventType.TURN_FINISHED, {"exit_code": 0})
+    db.set_state(sandbox_id, SandboxState.DESTROYED)
+
+    with client.stream("GET", f"/sandboxes/{sandbox_id}/events/stream") as response:
+        assert response.status_code == 200
+        lines = stream_lines(response)
+
+    assert [line["type"] for line in lines] == ["user_message", "turn_finished"]
+    assert lines[0]["data"] == {"text": "hi"}
+    assert lines[1]["seq"] == 2
+
+
+def test_the_stream_after_a_seq_skips_what_the_client_has(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    db.append_event(sandbox_id, EventType.USER_MESSAGE, {"text": "hi"})
+    db.append_event(sandbox_id, EventType.TURN_FINISHED, {"exit_code": 0})
+    db.set_state(sandbox_id, SandboxState.DESTROYED)
+
+    with client.stream("GET", f"/sandboxes/{sandbox_id}/events/stream", params={"after": 1}) as response:
+        lines = stream_lines(response)
+
+    assert [line["seq"] for line in lines] == [2]
+
+
+def test_the_stream_sends_an_event_appended_while_it_is_open(client, monkeypatch):
+    sandbox_id = make_running_sandbox(client, monkeypatch)
+    lines = iter_event_lines(sandbox_id, 0)
+    found: dict = {}
+
+    def pull() -> None:
+        found["line"] = next(line for line in lines if line.strip())
+
+    thread = threading.Thread(target=pull)
+    thread.start()
+    deadline = time.monotonic() + TURN_WAIT
+    while "line" not in found and time.monotonic() < deadline:
+        db.append_event(sandbox_id, EventType.PAUSED, {"paused_at": 10})
+        thread.join(0.05)
+    thread.join(TURN_WAIT)
+    lines.close()
+
+    assert "line" in found
+    event = json.loads(found["line"])
+    assert event["type"] == "paused"
+    assert event["data"] == {"paused_at": 10}
+
+
 def test_each_sandbox_counts_its_own_seq(client):
     first_id = "sbx_" + "a" * 32
     second_id = "sbx_" + "b" * 32
@@ -914,11 +971,12 @@ def test_a_turn_token_cannot_call_admin_routes(client, monkeypatch):
         client.post("/sandboxes", headers=bearer(token)),
         client.post(f"/sandboxes/{sandbox_id}/messages", json={"text": "hi"}, headers=bearer(token)),
         client.get(f"/sandboxes/{sandbox_id}/events", headers=bearer(token)),
+        client.get(f"/sandboxes/{sandbox_id}/events/stream", headers=bearer(token)),
         client.post(f"/sandboxes/{sandbox_id}/pause", headers=bearer(token)),
         client.post(f"/sandboxes/{sandbox_id}/resume", headers=bearer(token)),
     ]
 
-    assert [response.status_code for response in responses] == [403] * 7
+    assert [response.status_code for response in responses] == [403] * 8
     assert db.get_sandbox(sandbox_id).state == SandboxState.RUNNING
 
 

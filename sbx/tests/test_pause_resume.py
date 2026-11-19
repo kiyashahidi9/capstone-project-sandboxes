@@ -10,7 +10,7 @@ import locks
 import host_manager
 from api import db, helpers
 from api.main import app
-from api.models import SandboxState
+from api.models import EventType, SandboxState
 from runner import runner
 
 
@@ -142,6 +142,19 @@ def test_pause_then_resume(client, host):
     assert resumed.json()["state"] == "running"
     assert resumed.json()["paused_at"] is None
     assert host.calls == ["stop_turn", "pause", "resume"]
+
+
+def test_pause_and_resume_are_events(client, host):
+    make_sandbox(SandboxState.RUNNING)
+
+    client.post(f"/sandboxes/{ID}/pause")
+    client.post(f"/sandboxes/{ID}/resume")
+
+    events = db.list_events(ID)
+    assert [event.type for event in events] == [EventType.PAUSED, EventType.RESUMED]
+    assert list(events[0].data) == ["paused_at"]
+    assert isinstance(events[0].data["paused_at"], int)
+    assert events[1].data == {}
 
 
 def test_message_to_a_paused_sandbox_resumes_it_then_starts_the_turn(client, host, monkeypatch):

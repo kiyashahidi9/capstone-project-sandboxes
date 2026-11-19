@@ -14,6 +14,7 @@ from api import db
 from runner import runner
 from api.models import (
     CreateSandboxResponse,
+    EventType,
     ExecuteRequest,
     ExecuteResponse,
     ExecuteBackgroundResponse,
@@ -176,10 +177,13 @@ def save_snapshot(sandbox_id: str) -> None:
 
 def mark_paused(sandbox_id: str) -> None:
     """Records a pausing sandbox as paused, with where its snapshot is and when it paused."""
-    db.transition(
+    paused_at: int = db.now()
+    moved: bool = db.transition(
         sandbox_id, [SandboxState.PAUSING], SandboxState.PAUSED,
-        snapshot_dir=host_manager.snapshot_dir(sandbox_id), paused_at=db.now(),
+        snapshot_dir=host_manager.snapshot_dir(sandbox_id), paused_at=paused_at,
     )
+    if moved:
+        db.append_event(sandbox_id, EventType.PAUSED, {"paused_at": paused_at})
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +231,12 @@ def resume_locked(sandbox_id: str) -> None:
 
 def mark_resumed(sandbox_id: str) -> None:
     """Records a resuming sandbox as running again, clearing its snapshot details."""
-    db.transition(sandbox_id, [SandboxState.RESUMING], SandboxState.RUNNING, snapshot_dir=None, paused_at=None)
+    moved: bool = db.transition(
+        sandbox_id, [SandboxState.RESUMING], SandboxState.RUNNING,
+        snapshot_dir=None, paused_at=None,
+    )
+    if moved:
+        db.append_event(sandbox_id, EventType.RESUMED, {})
 
 
 # ---------------------------------------------------------------------------

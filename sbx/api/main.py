@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
+import queue
 import threading
+from collections.abc import Generator, Iterator
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 import host_manager
@@ -35,6 +38,7 @@ from api.helpers import (
 )
 from api.models import (
     CreateSandboxResponse,
+    Event,
     EventListResponse,
     EventType,
     ExecuteBackgroundResponse,
@@ -91,6 +95,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="sbx", lifespan=lifespan)
+
+# How long a stream waits for the next event before writing a blank line.
+# The blank line keeps the connection open and lets a closed client be noticed.
+# Clients skip blank lines.
+STREAM_POLL_SECONDS = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -208,3 +217,46 @@ def list_events(sandbox_id: str, after: int = Query(default=0, ge=0)) -> EventLi
     """Shows every event after seq `after`, oldest first; works for destroyed sandboxes too."""
     require_sandbox(sandbox_id)
     return EventListResponse(events=db.list_events(sandbox_id, after))
+
+
+@app.get("/sandboxes/{sandbox_id}/events/stream", dependencies=[ADMIN_ONLY])
+def stream_events(sandbox_id: str, after: int = Query(default=0, ge=0)) -> StreamingResponse:
+    """Sends the events after `after`, then each new one, until the sandbox is destroyed."""
+    require_sandbox(sandbox_id)
+    return StreamingResponse(iter_event_lines(sandbox_id, after), media_type="application/x-ndjson")
+
+
+def iter_event_lines(sandbox_id: str, after: int) -> Iterator[str]:
+    """Yields one JSON event per line. A destroyed sandbox ends the stream."""
+    updates = db.listen(sandbox_id)
+    last: int = after
+    try:
+        while True:
+            last = yield from event_lines_after(sandbox_id, last)
+            row = db.get_sandbox(sandbox_id)
+            if row is None or row.state is SandboxState.DESTROYED:
+                return
+            try:
+                seq: int | None = updates.get(timeout=STREAM_POLL_SECONDS)
+            except queue.Empty:
+                yield "\n"
+                continue
+            if seq is None:
+                yield from event_lines_after(sandbox_id, last)
+                return
+    finally:
+        db.unlisten(sandbox_id, updates)
+
+
+def event_lines_after(sandbox_id: str, after: int) -> Generator[str, None, int]:
+    """Yields stored events after `after`, and returns the last seq yielded, or `after`."""
+    last: int = after
+    for event in db.list_events(sandbox_id, after):
+        last = event.seq
+        yield event_line(event)
+    return last
+
+
+def event_line(event: Event) -> str:
+    """One event as a single JSON line."""
+    return json.dumps(event.model_dump(mode="json")) + "\n"

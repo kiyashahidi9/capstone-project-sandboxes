@@ -1,4 +1,7 @@
+import json
 import os
+from collections.abc import Iterator
+
 import httpx
 from dotenv import load_dotenv
 
@@ -61,13 +64,30 @@ def _call_api(
     res = httpx.request(method, url, timeout=timeout, **kwargs)
     
     if res.is_error:
-        try:
-            detail = res.json().get("detail", res.text)
-        except ValueError:
-            detail = res.text
-        raise SandboxError(res.status_code, str(detail))
+        raise SandboxError(res.status_code, _error_detail(res))
     
     return res
+
+
+def _error_detail(res: httpx.Response) -> str:
+    """The API's error message, or the raw body when it is not JSON."""
+    try:
+        detail = res.json().get("detail", res.text)
+    except ValueError:
+        detail = res.text
+    return str(detail)
+
+
+def _event_line(line: str) -> dict | None:
+    """One streamed event. A blank line or an SSE comment is skipped."""
+    text = line.strip()
+    if not text or text.startswith(":"):
+        return None
+    if text.startswith("data:"):
+        text = text[len("data:"):].strip()
+        if not text:
+            return None
+    return json.loads(text)
 
 
 def auth_headers(token: str | None) -> dict[str, str]:
@@ -287,6 +307,38 @@ class Sandbox:
         res = _call_api("GET", url, params={"after": after}, headers=self._headers)
 
         return res.json()["events"]
+
+    def subscribe(self, after: int = 0) -> Iterator[dict]:
+        """Follow this sandbox's events until the caller stops or the server closes.
+
+        Sends the last `seq` already applied. The server sends every later event,
+        then each new one, for the life of the sandbox. Closing this iterator
+        unsubscribes. A dropped connection is resumed by calling it again with
+        the last `seq` yielded.
+
+        Args:
+            after: The last `seq` already seen; 0 for everything.
+
+        Yields:
+            Each event, oldest first. The same shape as `events()`: `seq`,
+            `type`, `data` and `at` (unix seconds).
+
+        Raises:
+            SandboxError: If the API responds with an error status.
+        """
+
+        url = f"{self._url}/events/stream"
+        timeout = httpx.Timeout(DEFAULT_TIMEOUT, read=None)
+        with httpx.stream(
+            "GET", url, params={"after": after}, headers=self._headers, timeout=timeout,
+        ) as res:
+            if res.is_error:
+                res.read()
+                raise SandboxError(res.status_code, _error_detail(res))
+            for line in res.iter_lines():
+                event = _event_line(line)
+                if event is not None:
+                    yield event
 
     def pause(self) -> None:
         """Save the sandbox to disk and free its memory.

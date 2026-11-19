@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import re
 import sqlite3
+import threading
 import time
 from contextlib import closing
 from pathlib import Path
@@ -23,6 +25,10 @@ SELECT_SANDBOXES = """
     LEFT JOIN slots ON slots.sandbox_id = sandboxes.id
 """
 OLDEST_FIRST = "ORDER BY sandboxes.created_at, sandboxes.id"
+
+# One queue per open subscriber. A seq means a new event. None means the sandbox was destroyed.
+_watches: dict[str, list[queue.Queue[int | None]]] = {}
+_watches_guard = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +144,8 @@ def set_state(sandbox_id: str, state: SandboxState) -> bool:
             "UPDATE sandboxes SET state = ?, updated_at = ? WHERE id = ?",
             (state, now(), sandbox_id),
         )
+    if cursor.rowcount == 1 and state is SandboxState.DESTROYED:
+        notify_watchers(sandbox_id, None)
     return cursor.rowcount == 1
 
 
@@ -181,7 +189,10 @@ def transition(
             f"UPDATE sandboxes SET {assignments} WHERE id = ? AND state IN ({placeholders})",
             (to_state, now(), *fields.values(), sandbox_id, *from_states),
         )
-    return cursor.rowcount == 1
+    moved: bool = cursor.rowcount == 1
+    if moved and to_state is SandboxState.DESTROYED:
+        notify_watchers(sandbox_id, None)
+    return moved
 
 
 def set_turn_state(sandbox_id: str, turn_state: TurnState) -> None:
@@ -215,7 +226,35 @@ def append_event(sandbox_id: str, event_type: EventType, data: dict) -> int:
                 sandbox_id,
             ),
         ).fetchone()
-    return row["seq"]
+    seq: int = row["seq"]
+    notify_watchers(sandbox_id, seq)
+    return seq
+
+
+def listen(sandbox_id: str) -> queue.Queue[int | None]:
+    """Starts waiting for this sandbox's new events. The caller must unlisten."""
+    updates: queue.Queue[int | None] = queue.Queue()
+    with _watches_guard:
+        _watches.setdefault(sandbox_id, []).append(updates)
+    return updates
+
+
+def unlisten(sandbox_id: str, updates: queue.Queue[int | None]) -> None:
+    """Stops one listen. Later events for this sandbox are not delivered to it."""
+    with _watches_guard:
+        watchers: list[queue.Queue[int | None]] = _watches.get(sandbox_id, [])
+        if updates in watchers:
+            watchers.remove(updates)
+        if not watchers:
+            _watches.pop(sandbox_id, None)
+
+
+def notify_watchers(sandbox_id: str, seq: int | None) -> None:
+    """Wakes this sandbox's listeners. seq is the new event. None means it was destroyed."""
+    with _watches_guard:
+        watchers: list[queue.Queue[int | None]] = list(_watches.get(sandbox_id, []))
+    for updates in watchers:
+        updates.put(seq)
 
 
 # ---------------------------------------------------------------------------
