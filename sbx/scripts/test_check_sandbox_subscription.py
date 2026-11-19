@@ -68,7 +68,11 @@ def take_turn(events: queue.Queue[dict | None]) -> list[dict]:
 
 
 def main() -> None:
-    sandbox = Sandbox.create()
+    admin_key = os.environ.get("SANDBOX_ADMIN_KEY")
+    if not admin_key:
+        sys.exit("SANDBOX_ADMIN_KEY is not set; add it to .env (the same value as on the host)")
+
+    sandbox = Sandbox.create(token=admin_key)
     print(f"sandbox {sandbox.id} subscribed", flush=True)
 
     incoming: queue.Queue[dict | None] = queue.Queue()
