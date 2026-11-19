@@ -82,6 +82,7 @@ def summarize_turn(number: int, events: list[Event], working: bool, now: int) ->
 
     return TurnSummary(
         turn=number,
+        message=str(events[0].data.get("text", "")),    # a turn always starts with its user_message
         status=turn_status(end, working, now - last_event.at),
         reason=end_data.get("reason"),
         cause=failure_cause(end),

@@ -223,6 +223,7 @@ class TurnSummary(BaseModel):
     """One turn (one user message and everything done for it), for investigating failures."""
 
     turn: int                       # 1, 2, 3, ... per sandbox, in message order
+    message: str                    # what the user asked: the turn's user_message text
     status: TurnStatus
     reason: str | None = None       # from turn_failed: exit, timeout, paused, server restarted, ...
     cause: FailureCause | None = None

@@ -25,6 +25,7 @@ export type TurnStatus = "running" | "unresponsive" | "finished" | "failed" | "p
 // same fields as the API's TurnSummary (docs/observability.md)
 export type TurnSummary = {
   turn: number;
+  message: string;          // what the user asked
   status: TurnStatus;
   reason: string | null;
   cause: "agent" | "sandbox" | "host" | "paused" | "unknown" | null;

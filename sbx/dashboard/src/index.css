@@ -168,18 +168,68 @@ button.toggle.on {
   color: white;
 }
 
-details.message {
-  margin-bottom: 4px;
-  padding: 4px 8px;
+/* chat: one group per turn, user on the right, assistant and tool cards on the left */
+.chat { display: flex; flex-direction: column; gap: 6px; }
+
+details.chat-group {
+  padding: 6px 10px;
   border: 1px solid #d0d7de;
+  border-radius: 8px;
+  background: white;
+}
+details.chat-group > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+details.chat-group[open] > summary { margin-bottom: 8px; }
+details.chat-group > .bubble, details.chat-group > .tool-card { margin-bottom: 6px; }
+
+.bubble {
+  max-width: 85%;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.bubble pre { margin: 4px 0 0; padding: 0; background: none; max-height: 300px; }
+.bubble.user { margin-left: auto; background: #ddf4ff; }
+.bubble.assistant { background: #f6f8fa; }
+.bubble.system { max-width: none; background: #fff8c5; }
+.bubble.system summary { cursor: pointer; }
+.who { font-size: 11px; font-weight: 600; color: #57606a; text-transform: uppercase; }
+
+.tool-card {
+  max-width: 85%;
+  padding: 6px 10px;
+  border: 1px solid #d0d7de;
+  border-left: 3px solid #0969da;
   border-radius: 6px;
   background: white;
   font-size: 13px;
 }
-details.message summary { cursor: pointer; }
+.tool-card summary { cursor: pointer; }
+.result { color: #116329; }
+.result.failed { color: #cf222e; }
 
-.tool {
-  margin-bottom: 8px;
-  padding: 8px;
-  border-left: 3px solid #0969da;
+/* messages added since the previous step */
+.bubble.new, .tool-card.new { box-shadow: 0 0 0 2px #54aeff; }
+
+
+details.chat-history {
+  padding: 6px 10px;
+  border: 1px dashed #d0d7de;
+  border-radius: 8px;
+  background: #f6f8fa;
+}
+details.chat-history > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #57606a; }
+details.chat-history[open] > summary { margin-bottom: 8px; }
+details.chat-history > details.chat-group { margin-bottom: 6px; }
+
+/* the user's message in the timeline */
+tr.user-row { background: #f0f8ff; }
+tr.user-row .bubble.user { margin-left: 0; max-width: none; }
+.badge.user { background: #ddf4ff; color: #0550ae; }
+
+/* the turns table's message column: one line, cut with … when long (hover shows it all) */
+td.message-cell {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

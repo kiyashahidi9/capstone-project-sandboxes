@@ -187,6 +187,7 @@ export default function SandboxDetail({ sandboxId, onBack }: { sandboxId: string
             <thead>
               <tr>
                 <th>Turn</th>
+                <th>Message</th>
                 <th>Status</th>
                 <th>Started</th>
                 <th>Took</th>
@@ -201,6 +202,7 @@ export default function SandboxDetail({ sandboxId, onBack }: { sandboxId: string
                   onClick={() => setChosenTurn(t.turn)}
                 >
                   <td>{t.turn}</td>
+                  <td className="message-cell" title={t.message}>{firstLine(t.message)}</td>
                   <td><span className={`badge ${t.status}`}>{t.status}</span></td>
                   <td>{formatTime(t.started_at)}</td>
                   <td>{t.ended_at !== null ? formatDuration(t.ended_at - t.started_at) : "…"}</td>
@@ -229,16 +231,29 @@ export default function SandboxDetail({ sandboxId, onBack }: { sandboxId: string
               ) : (
               <table className="timeline">
                 <tbody>
-                  {events.map((event) => (
-                    <tr key={event.seq} className="clickable" onClick={() => setOpenSeq(openSeq === event.seq ? null : event.seq)}>
-                      <td className="muted">{formatTime(event.at)}</td>
-                      <td><code>{event.type}</code></td>
-                      <td>
-                        {summarize(event)}
-                        {openSeq === event.seq && <pre>{JSON.stringify(event.data, null, 2)}</pre>}
-                      </td>
-                    </tr>
-                  ))}
+                  {events.map((event) =>
+                    event.type === "user_message" ? (
+                      // the user's message: highlighted and shown in full, since it's what the turn is about
+                      <tr key={event.seq} className="user-row">
+                        <td className="muted">{formatTime(event.at)}</td>
+                        <td><span className="badge user">User</span></td>
+                        <td>
+                          <div className="bubble user">
+                            <pre>{String(event.data.text ?? "")}</pre>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr key={event.seq} className="clickable" onClick={() => setOpenSeq(openSeq === event.seq ? null : event.seq)}>
+                        <td className="muted">{formatTime(event.at)}</td>
+                        <td><code>{event.type}</code></td>
+                        <td>
+                          {summarize(event)}
+                          {openSeq === event.seq && <pre>{JSON.stringify(event.data, null, 2)}</pre>}
+                        </td>
+                      </tr>
+                    ),
+                  )}
                 </tbody>
               </table>
               )}

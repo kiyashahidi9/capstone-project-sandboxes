@@ -20,7 +20,7 @@ Nothing new is stored. Everything is read from the existing `events` table in `s
 
 | Method | Endpoint | Returns |
 |--------|----------|---------|
-| GET | `/sandboxes/{id}/turns` | One summary per turn: `status`, `reason`, `cause`, `exit_code`, `stderr_tail`, `last_action`, `unfinished_step`, `seconds_since_last_event` |
+| GET | `/sandboxes/{id}/turns` | One summary per turn: `message` (what the user asked), `status`, `reason`, `cause`, `exit_code`, `stderr_tail`, `last_action`, `unfinished_step`, `seconds_since_last_event` |
 | GET | `/sandboxes/{id}/events?turn=N&after=S` | One turn's events, oldest first. 404 if there is no turn `N` |
 | GET | `/sandboxes/{id}/replay?turn=N` | One step per model call: the `messages` sent (system prompt first), the `response`, each tool's `result`, and `matches_record`. 404 if there is no turn `N` |
 

@@ -62,6 +62,7 @@ def test_a_finished_turn():
     [summary] = observability.summarize_turns(make_events(*FINISHED), agent_working=False, now=NOW + 10)
 
     assert summary.status == "finished"
+    assert summary.message == "hi"
     assert summary.cause is None
     assert summary.last_action.data == {"text": "hello"}
     assert summary.unfinished_step is None
@@ -147,9 +148,9 @@ def test_turns_endpoint_sums_up_every_turn_after_destroy(client):
 
     assert response.status_code == 200
     turns = response.json()["turns"]
-    assert [(turn["turn"], turn["status"], turn["cause"]) for turn in turns] == [
-        (1, "finished", None),
-        (2, "failed", "agent"),
+    assert [(turn["turn"], turn["message"], turn["status"], turn["cause"]) for turn in turns] == [
+        (1, "hi", "finished", None),
+        (2, "fix the tests", "failed", "agent"),
     ]
     assert turns[1]["unfinished_step"]["data"]["arguments"] == {"cmd": "pytest"}
 
