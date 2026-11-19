@@ -153,7 +153,6 @@ It prints one line per check and ends with `all checks passed`:
 ## 7. Pause and resume ⏸ not built yet (Track C)
 
 - [ ] Leave the sandbox idle until it auto-pauses, then send a follow-up. It resumes and carries on.
-- [ ] `/pause`, `/resume`, `/keep-awake` and `/status` each work.
 
 ## 8. Quit and check cleanup
 
