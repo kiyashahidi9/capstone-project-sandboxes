@@ -4,11 +4,14 @@ only the VM is faked
 """
 
 import shlex
+import socket
 import sys
+import threading
+import time
 from contextlib import closing
 
 import pytest
-from fastapi.testclient import TestClient
+import uvicorn
 
 import host_manager
 from api import db
@@ -57,19 +60,31 @@ def api(tmp_path, monkeypatch):
     script.write_text(AGENT)
     monkeypatch.setenv("AGENT_CMD", shlex.join([sys.executable, str(script)]))
 
-    with TestClient(app) as test_client:
-        def request(method, url, timeout=None, **kwargs):
-            return test_client.request(method, url, **kwargs)
+    # A real server, so the chat's long-lived event stream and the next message
+    # are two connections. The in-process test client cannot hold both at once.
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port: int = sock.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline: float = time.monotonic() + 5
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if not server.started:
+        raise RuntimeError("the test API did not start")
 
-        monkeypatch.setattr(sdk.httpx, "request", request)
-        original_create = sdk.Sandbox.create.__func__
-        monkeypatch.setattr(
-            sdk.Sandbox,
-            "create",
-            classmethod(lambda cls, token=None: original_create(cls, api="http://testserver", token=token)),
-        )
-        monkeypatch.setattr(chat, "POLL_SECONDS", 0.05)
+    original_create = sdk.Sandbox.create.__func__
+    monkeypatch.setattr(
+        sdk.Sandbox,
+        "create",
+        classmethod(lambda cls, token=None: original_create(cls, api=f"http://127.0.0.1:{port}", token=token)),
+    )
+    try:
         yield
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
 
 
 def chat_with(monkeypatch, capsys, lines: list[str]) -> list[str]:
