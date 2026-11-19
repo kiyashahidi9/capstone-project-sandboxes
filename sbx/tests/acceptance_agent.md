@@ -14,8 +14,6 @@ You use 3 terminals, all opened on your laptop:
 
 Replace `<vm>` and `<zone>` with your VM's name and zone (e.g. `sbx-node-1`, `us-east1-b`).
 
-Steps marked **⏸ not built yet** depend on Track C (pause and resume). Skip them until those land, and leave their boxes unticked.
-
 ## Before you start
 
 **VM-1:** get the latest code and set up the host. On a fresh VM, first run `git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git ~/capstone-project-sandboxes`.
@@ -150,9 +148,9 @@ It prints one line per check and ends with `all checks passed`:
 
 **VM-1:** stop the API and start it again the normal way (step 1).
 
-## 7. Pause and resume ⏸ not built yet (Track C)
+## 7. Pause and resume
 
-- [ ] Leave the sandbox idle until it auto-pauses, then send a follow-up. It resumes and carries on.
+- [ ] Leave the sandbox idle until it auto-pauses (about 30 seconds after the agent's turn ends; the chat shows `[paused]` with your next message), then send a follow-up. It resumes and carries on.
 
 ## 8. Quit and check cleanup
 
