@@ -1,6 +1,6 @@
 # Car end-to-end test: every track on the GCP host
 
-The whole system on real Firecracker and a real bucket, from the `final-bicycle` branch. About 80 minutes, 20 of them waiting for the install. Best run by a teammate who didn't write `install.sh`.
+The whole system on real Firecracker and a real bucket, from the `track-c-car` branch. About 80 minutes, 20 of them waiting for the install. Best run by a teammate who didn't write `install.sh`.
 
 | Part | Tests |
 |---|---|
@@ -19,7 +19,7 @@ The whole system on real Firecracker and a real bucket, from the `final-bicycle`
 
 **Before you start**
 - `gcloud` installed and logged in (`gcloud auth login`).
-- A GCP project with billing on. A **new** project is best: it proves the installer works from nothing.
+- A billing account you can use (`gcloud billing accounts list` shows it). Part 0 makes a **new** project, `sbx-car-test-1`, to prove the installer works from nothing.
 - An OpenAI API key.
 - The repo cloned on your laptop. `install.sh` installs the commit you're on, so it must be pushed.
 
@@ -37,13 +37,24 @@ Always log in as **`sbx@`**: that's the account the installer uses, so the repo 
 
 ## Part 0: Install (6a)
 
-**Laptop:**
+**Laptop** (your own computer, not the VM): make a new project and link billing to it.
 
 ```bash
-git fetch && git checkout final-bicycle && git pull
+PROJECT=sbx-car-test-1                   # project IDs are global: if it's taken, add a number, e.g. sbx-car-test-1-lx
+gcloud projects create $PROJECT --name="sbx car test"
+gcloud billing accounts list             # copy the ACCOUNT_ID
+gcloud billing projects link $PROJECT --billing-account=<ACCOUNT_ID>
+gcloud config set project $PROJECT
+```
+
+- [ ] `gcloud billing projects describe $PROJECT` shows `billingEnabled: true`.
+
+**Laptop:** install from the branch.
+
+```bash
+git fetch && git checkout track-c-car && git pull
 git status --short                       # nothing: uncommitted changes are NOT installed
-gcloud config set project <your-project-id>
-export VM=sbx-node-1 ZONE=us-east1-b     # if the project already has an old sbx-node-1, use a new name, e.g. VM=sbx-e2e
+export VM=sbx-node-1 ZONE=us-east1-b
 VM_NAME=$VM ZONE=$ZONE sbx/scripts/install.sh
 ```
 
@@ -509,14 +520,13 @@ gcloud storage ls -r $BUCKET/ | grep -c complete                      # 0
 
 - [ ] Every line prints what its comment says.
 
-**Laptop:** stop the VM. On a throwaway project, delete everything instead.
+**Laptop:** delete the test project, which removes the VM, the bucket and everything else in it, so nothing keeps billing.
 
 ```bash
-gcloud compute instances stop $VM --zone=$ZONE
-# throwaway project only:
-# gcloud compute instances delete $VM --zone=$ZONE --quiet
-# gcloud storage rm -r gs://$(gcloud config get-value project)-sbx-snapshots
+gcloud projects delete sbx-car-test-1    # or the ID you used; asks to confirm
 ```
+
+- [ ] `gcloud projects list` no longer shows it. Google keeps it restorable for 30 days, but billing stops right away.
 
 ---
 

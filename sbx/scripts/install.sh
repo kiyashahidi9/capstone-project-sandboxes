@@ -152,7 +152,8 @@ turn_off_os_login() {
 
 # Runs a command on the VM as the shared sbx user.
 vm_ssh() {
-  gcloud compute ssh "$VM_USER@$VM_NAME" --zone="$ZONE" --quiet -- "$@"
+  # --command, not "-- cmd": gcloud then opens no terminal, so output has no stray \r and stdin can be piped in
+  gcloud compute ssh "$VM_USER@$VM_NAME" --zone="$ZONE" --quiet --command="$*"
 }
 
 # Waits until the VM accepts SSH, which takes up to about two minutes after it's created.
@@ -167,8 +168,10 @@ wait_for_ssh() {
 
 # Stops unless SSH really lands in the sbx account; an organization rule forcing OS Login prevents that.
 require_shared_user() {
-  [[ $(vm_ssh whoami) == "$VM_USER" ]] \
-    || die "your organization requires OS Login, so everyone would get a different account on $VM_NAME. This installer doesn't support that yet."
+  local user
+  user=$(vm_ssh whoami)
+  [[ $user == "$VM_USER" ]] \
+    || die "SSH logged in as '$user', not $VM_USER: your organization probably requires OS Login, so everyone would get a different account on $VM_NAME. This installer doesn't support that yet."
 }
 
 # Gives the commit this computer's copy of the repo is on: the version the VM gets.
