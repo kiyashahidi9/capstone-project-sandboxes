@@ -366,10 +366,15 @@ RECORDED_STEPS: dict[str, EventType] = {
 def record_line(sandbox_id: str, line: str) -> None:
     """
     Saves one line the agent printed
+    a blank line is skipped
     a JSON object with "type": "question" is a question
+    a JSON object with "type": "agent_output" is one output event, even when its text has many lines
     a JSON object with a recorded step type is that event
-    anything else is plain output
+    anything else is plain output, one event per line
     """
+    if not line.strip():
+        return
+
     try:
         parsed = json.loads(line)
     except ValueError:
@@ -377,6 +382,12 @@ def record_line(sandbox_id: str, line: str) -> None:
 
     if isinstance(parsed, dict) and parsed.get("type") == "question":
         db.append_event(sandbox_id, EventType.QUESTION, {"text": capped(str(parsed.get("text", "")))})
+        return
+
+    if isinstance(parsed, dict) and parsed.get("type") == "agent_output":
+        text = str(parsed.get("text", ""))
+        if text.strip():
+            db.append_event(sandbox_id, EventType.AGENT_OUTPUT, {"text": capped(text)})
         return
 
     step: EventType | None = RECORDED_STEPS.get(parsed.get("type")) if isinstance(parsed, dict) else None

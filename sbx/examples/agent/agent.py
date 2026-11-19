@@ -58,8 +58,14 @@ def load_history(path: str | None) -> list[dict]:
 ## STEPS (docs/agent_contract.md, read by docs/observability.md) ##
 
 def step(kind: str, **data) -> None:
-    """Prints one step as a JSON line; the runner stores it as its own event, and the chat doesn't show it."""
+    """Prints one step as a JSON line; the runner stores it as its own event (the chat shows only agent_output)."""
     print(json.dumps({"type": kind, **data}, default=str))
+
+
+def say(text: str) -> None:
+    """Shows the user one message, as one agent_output event even when it has many lines; skips blank ones."""
+    if text.strip():
+        step("agent_output", text=text)
 
 
 def parse_arguments(text: str):
@@ -80,23 +86,23 @@ def run_tool(sandbox: Sandbox, name: str, args: dict) -> object:
     """
     if name == "run_command":
         background = args.get("background", False)
-        print(f"[run] {args['cmd']}" + ("   (background)" if background else ""))
+        say(f"[run] {args['cmd']}" + ("   (background)" if background else ""))
 
         result = sandbox.exec(args["cmd"], cwd=WORKDIR, background=background)
 
+        # the first few lines of output, as one message
         output = result.get("stdout", "") + result.get("stderr", "")
-        for line in output.splitlines()[:5]:
-            print(f"      {line}")
+        say("\n".join(f"      {line}" for line in output.splitlines()[:5]))
 
         return result
 
     path = absolute_path(args["path"])
 
     if name == "read_file":
-        print(f"[read] {path}")
+        say(f"[read] {path}")
         return sandbox.read_file(path)
 
-    print(f"[write] {path}")
+    say(f"[write] {path}")
     sandbox.write_file(path, args["content"])
     return "ok"
 
@@ -153,7 +159,7 @@ def main() -> int:
         messages.append(assistant_message(reply))
 
         if not message.tool_calls:
-            print(message.content or "")    # plain text too, so the chat shows the answer
+            say(message.content or "")      # as output too, so the chat shows the answer
             return EXIT_FINISHED
 
         for call, recorded in zip(message.tool_calls, reply["tool_calls"]):
@@ -166,7 +172,7 @@ def main() -> int:
             step("tool_completed", tool_call_id=call.id, result=result)
             messages.append(tool_message(call.id, result))
 
-    print(f"stopped after {MAX_STEPS} steps without finishing")
+    say(f"stopped after {MAX_STEPS} steps without finishing")
     return EXIT_FAILED
 
 

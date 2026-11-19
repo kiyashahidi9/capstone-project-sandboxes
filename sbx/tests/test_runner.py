@@ -290,6 +290,26 @@ def test_a_question_line_becomes_a_question_event(tmp_path, monkeypatch):
     assert_turn_over()
 
 
+def test_blank_lines_are_skipped_and_an_output_line_keeps_its_lines_together(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, r"""
+import json
+print("")
+print("   ")
+print(json.dumps({"type": "agent_output", "text": "Fixed it.\n\n- changed the port\n- reran the tests"}))
+print(json.dumps({"type": "agent_output", "text": "  \n "}))
+print("plain line")
+""")
+    send()
+
+    runner.run_turn(SANDBOX_ID)
+
+    assert events()[2:] == [
+        (EventType.AGENT_OUTPUT, {"text": "Fixed it.\n\n- changed the port\n- reran the tests"}),
+        (EventType.AGENT_OUTPUT, {"text": "plain line"}),
+        (EventType.TURN_FINISHED, {"exit_code": 0}),
+    ]
+
+
 def test_an_agent_past_the_time_limit_is_killed(tmp_path, monkeypatch):
     use_agent(tmp_path, monkeypatch, SLEEPS, timeout=1)
     send()
