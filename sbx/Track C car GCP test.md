@@ -1,4 +1,4 @@
-# Car end-to-end test: Track C on the GCP host
+# Track C car GCP test
 
 Tests Track C's car work on real Firecracker and a real bucket, from the `track-c-car` branch. About 55 minutes, 20 of them waiting for the install. Best run by a teammate who didn't write `install.sh`.
 
