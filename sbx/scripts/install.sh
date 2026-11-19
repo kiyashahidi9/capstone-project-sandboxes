@@ -50,7 +50,7 @@ API_TRIES=15                      # the API takes a few seconds to start
 API_WAIT_SECONDS=2
 
 die()  { echo "error: $*" >&2; exit 1; }
-log()  { echo "==> $*"; }
+log()  { echo "==> install $*"; }   # "install": the setup scripts it runs on the VM print their own numbered steps
 skip() { echo "    $* already exists"; }
 
 # Reads --agent and --cmd from the command line.
@@ -343,6 +343,8 @@ main() {
   if [[ -n $AGENT_PATH ]]; then
     log "11. your agent $AGENT_PATH"
     send_agent
+  else
+    log "11. your agent: none, using the example agent (add --agent to install yours)"
   fi
 
   log "12. agent lockdown"
