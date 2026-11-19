@@ -7,15 +7,17 @@ run from sbx/:
 """
 
 import os
+import queue
 import sys
-import time
+import threading
+
+import httpx
 
 from sdk.sandbox import Sandbox, SandboxError   # also loads .env
 
 
 ## CONFIG ##
 
-POLL_SECONDS = 1          # how often to ask for new events while a turn runs
 STDERR_LINES_SHOWN = 5    # how much of a failed agent's stderr to show
 
 
@@ -53,18 +55,33 @@ def show_event(event: dict) -> bool:
     return False
 
 
-def wait_for_turn(sandbox: Sandbox, last_seq: int) -> int:
+def follow(sandbox: Sandbox, events: queue.Queue[dict | None]) -> None:
     """
-    Shows the turn's events as they arrive, until it finishes or fails
-    returns the last seq seen, for the next turn
+    Holds one subscription for the life of the sandbox
+    a dropped connection subscribes again from the last seq; the server ending the stream stops it
     """
+    last_seq = 0
     while True:
-        for event in sandbox.events(after=last_seq):
-            last_seq = event["seq"]
-            if show_event(event):
-                return last_seq
+        try:
+            for event in sandbox.subscribe(after=last_seq):
+                last_seq = event["seq"]
+                events.put(event)
+        except httpx.TransportError:
+            continue
+        except SandboxError:
+            events.put(None)
+            return
+        else:
+            events.put(None)
+            return
 
-        time.sleep(POLL_SECONDS)
+
+def wait_for_turn(events: queue.Queue[dict | None]) -> None:
+    """Shows events from the open subscription until the turn finishes or fails."""
+    while True:
+        event = events.get()
+        if event is None or show_event(event):
+            return
 
 
 ## CHAT LOOP ##
@@ -82,7 +99,9 @@ def main() -> None:
     sandbox = Sandbox.create(token=admin_key)
     print(f"sandbox {sandbox.id} ready")
 
-    last_seq = 0
+    events: queue.Queue[dict | None] = queue.Queue()
+    reader = threading.Thread(target=follow, args=(sandbox, events), name="sandbox-events", daemon=True)
+    reader.start()
 
     try:
         while (text := input("> ").strip()) != "/quit":
@@ -95,13 +114,14 @@ def main() -> None:
                 print(f"error: {error.detail}")
                 continue
 
-            last_seq = wait_for_turn(sandbox, last_seq)
+            wait_for_turn(events)
 
     except (KeyboardInterrupt, EOFError):
         print()
 
     finally:
         sandbox.destroy()
+        reader.join(timeout=5)
         print(f"sandbox {sandbox.id} destroyed")
 
 

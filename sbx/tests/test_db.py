@@ -6,7 +6,7 @@ import pytest
 
 import host_manager
 from api import db
-from api.models import SandboxState
+from api.models import EventType, SandboxState
 
 
 ID_A = "sbx_" + "a" * 32
@@ -342,3 +342,41 @@ def test_list_live_skips_destroyed():
 def test_lists_are_empty_on_fresh_database():
     assert db.list_sandboxes() == []
     assert db.list_live_sandboxes() == []
+
+
+# --- event listeners --------------------------------------------------------
+
+def test_a_new_event_wakes_that_sandbox_with_its_seq():
+    updates = db.listen(ID_A)
+    try:
+        seq = db.append_event(ID_A, EventType.USER_MESSAGE, {"text": "hi"})
+        assert updates.get(timeout=1) == seq
+        assert updates.empty()
+    finally:
+        db.unlisten(ID_A, updates)
+
+
+def test_an_event_for_another_sandbox_does_not_wake_this_one():
+    updates = db.listen(ID_A)
+    try:
+        db.append_event(ID_B, EventType.USER_MESSAGE, {"text": "hi"})
+        assert updates.empty()
+    finally:
+        db.unlisten(ID_A, updates)
+
+
+def test_destroying_a_sandbox_wakes_its_listener_with_nothing():
+    db.insert_sandbox(ID_A)
+    updates = db.listen(ID_A)
+    try:
+        assert db.set_state(ID_A, SandboxState.DESTROYED) is True
+        assert updates.get(timeout=1) is None
+    finally:
+        db.unlisten(ID_A, updates)
+
+
+def test_unlisten_drops_later_events():
+    updates = db.listen(ID_A)
+    db.unlisten(ID_A, updates)
+    db.append_event(ID_A, EventType.USER_MESSAGE, {"text": "hi"})
+    assert updates.empty()

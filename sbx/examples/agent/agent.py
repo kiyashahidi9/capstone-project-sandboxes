@@ -7,6 +7,7 @@ try it by hand from sbx/:
       uv run python examples/agent/agent.py
 """
 
+import importlib.util
 import json
 import os
 import posixpath
@@ -15,7 +16,18 @@ import sys
 from openai import OpenAI
 
 from sdk.sandbox import Sandbox
-from tools import build_tools   # examples/agent/tools.py, next to this file
+
+
+def load_build_tools():
+    """Loads build_tools from the tools.py next to this file."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools.py")
+    spec = importlib.util.spec_from_file_location("example_agent_tools", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.build_tools
+
+
+build_tools = load_build_tools()
 
 
 ## CONFIG ##
@@ -77,35 +89,70 @@ def history_to_messages(events: list[dict]) -> list[dict]:
     return messages
 
 
+## STEPS ##
+
+def emit(event: dict) -> None:
+    """Prints one step as a single JSON line. The runner stores that line as an event."""
+    print(json.dumps(event), flush=True)
+
+
+def to_jsonable(value):
+    """Turns a model message into plain JSON so the request line can be stored."""
+    if hasattr(value, "model_dump"):
+        return value.model_dump(exclude_none=True)
+    if isinstance(value, dict):
+        return {key: to_jsonable(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [to_jsonable(item) for item in value]
+    return value
+
+
+def call_record(call) -> dict:
+    """The stored shape of one tool call: id, name, and arguments as an object when the JSON parses."""
+    raw: str = call.function.arguments
+    try:
+        arguments = json.loads(raw)
+    except json.JSONDecodeError:
+        arguments = raw
+    return {"tool_call_id": call.id, "name": call.function.name, "arguments": arguments}
+
+
+def result_text(result: dict | str) -> str:
+    """The tool message the model reads. An object result is stored as JSON text."""
+    if isinstance(result, str):
+        return result
+    return json.dumps(result)
+
+
 ## TOOL RUNNER ##
 
-def run_tool(sandbox: Sandbox, name: str, args: dict) -> str:
+def run_tool(sandbox: Sandbox, name: str, args: dict) -> dict | str:
     """
     Runs one tool call from the model in the sandbox
     prints what it's doing
-    returns the result as text for the model
+    returns the result to store and to show the model
     """
     if name == "run_command":
         background = args.get("background", False)
         print(f"[run] {args['cmd']}" + ("   (background)" if background else ""))
 
-        result = sandbox.exec(args["cmd"], cwd=WORKDIR, background=background)
+        result: dict = sandbox.exec(args["cmd"], cwd=WORKDIR, background=background)
 
         output = result.get("stdout", "") + result.get("stderr", "")
         for line in output.splitlines()[:5]:
             print(f"      {line}")
 
-        return json.dumps(result)
+        return result
 
     path = absolute_path(args["path"])
 
     if name == "read_file":
         print(f"[read] {path}")
-        return sandbox.read_file(path)
+        return {"path": path, "content": sandbox.read_file(path)}
 
     print(f"[write] {path}")
     sandbox.write_file(path, args["content"])
-    return "ok"
+    return {"path": path, "content": args["content"]}
 
 
 def absolute_path(path: str) -> str:
@@ -114,6 +161,71 @@ def absolute_path(path: str) -> str:
 
 
 ## TURN ##
+
+def run_turn(task: str, sandbox: Sandbox, client: OpenAI, history: list[dict]) -> int:
+    """
+    Does one turn: the task, with the earlier events in history
+    prints each model call and tool result before the next side effect
+    returns the exit code: 0 when finished, 1 when it gave up
+    """
+    messages: list = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages += history_to_messages(history)
+    messages.append({"role": "user", "content": task})
+
+    for _ in range(MAX_STEPS):
+        emit({
+            "type": "llm_request",
+            "model": MODEL,
+            "system": SYSTEM_PROMPT,
+            "tools": TOOLS,
+            "messages": to_jsonable(messages),
+        })
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            tools=TOOLS,
+        )
+        message = response.choices[0].message
+        messages.append(message)
+
+        if not message.tool_calls:
+            text: str = message.content or ""
+            emit({"type": "llm_response", "text": text})
+            print(text)
+            return EXIT_FINISHED
+
+        records: list[dict] = [call_record(call) for call in message.tool_calls]
+        emit({"type": "llm_response", "tool_calls": records})
+
+        for record in records:
+            emit({
+                "type": "tool_started",
+                "tool_call_id": record["tool_call_id"],
+                "name": record["name"],
+                "arguments": record["arguments"],
+            })
+            try:
+                arguments = record["arguments"]
+                if not isinstance(arguments, dict):
+                    raise ValueError("tool arguments are not a JSON object")
+                result: dict | str = run_tool(sandbox, record["name"], arguments)
+            except Exception as error:
+                result = f"error: {error}"
+
+            emit({
+                "type": "tool_completed",
+                "tool_call_id": record["tool_call_id"],
+                "result": result,
+            })
+            messages.append({
+                "role": "tool",
+                "tool_call_id": record["tool_call_id"],
+                "content": result_text(result),
+            })
+
+    print(f"stopped after {MAX_STEPS} steps without finishing")
+    return EXIT_FAILED
+
 
 def main() -> int:
     """
@@ -128,42 +240,8 @@ def main() -> int:
         print("no message on stdin", file=sys.stderr)
         return EXIT_FAILED
 
-    sandbox = Sandbox.from_env()
-    client = OpenAI()
-
     history = load_history(os.environ.get("SANDBOX_HISTORY"))
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages += history_to_messages(history)
-    messages.append({"role": "user", "content": task})
-
-    for _ in range(MAX_STEPS):
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            tools=TOOLS,
-        )
-        message = response.choices[0].message
-        messages.append(message)
-
-        if not message.tool_calls:
-            print(message.content or "")
-            return EXIT_FINISHED
-
-        for call in message.tool_calls:
-            try:
-                args = json.loads(call.function.arguments)
-                output = run_tool(sandbox, call.function.name, args)
-            except Exception as e:
-                output = f"error: {e}"
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": output,
-            })
-
-    print(f"stopped after {MAX_STEPS} steps without finishing")
-    return EXIT_FAILED
+    return run_turn(task, Sandbox.from_env(), OpenAI(), history)
 
 
 if __name__ == "__main__":
