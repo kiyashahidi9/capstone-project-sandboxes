@@ -384,3 +384,8 @@ def test_delete_bucket_copies_does_nothing_without_a_bucket(monkeypatch):
     monkeypatch.setattr(uploads, "storage_bucket", lambda: pytest.fail("storage was used"))
 
     uploads.delete_bucket_copies(ID)
+
+
+def test_unit_tests_never_point_at_a_real_bucket():
+    """Checks no test can upload to the host's real bucket, even when the host's .env sets SNAPSHOT_BUCKET."""
+    assert uploads.bucket_name() == ""
