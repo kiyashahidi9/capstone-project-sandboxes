@@ -6,7 +6,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-import node_agent
+import host_manager
 from api import auth, db
 from api.main import app
 from api.models import CreateSandboxResponse, EventType, SandboxState, TurnState
@@ -34,17 +34,17 @@ def remember_slot(sandbox_id: str, n: int) -> None:
 
 
 def test_create_returns_a_running_sandbox(client, monkeypatch):
-    def boot(sandbox_id: str | None = None) -> node_agent.Sandbox:
+    def boot(sandbox_id: str | None = None) -> host_manager.Sandbox:
         remember_slot(sandbox_id, 4)
-        return node_agent.Sandbox(
+        return host_manager.Sandbox(
             id=sandbox_id,
             n=4,
-            ip=node_agent.guest_ip_for(4),
+            ip=host_manager.guest_ip_for(4),
             pid=10,
             boot_seconds=1.25,
         )
 
-    monkeypatch.setattr(node_agent, "create_sandbox", boot)
+    monkeypatch.setattr(host_manager, "create_sandbox", boot)
     response = client.post("/sandboxes")
 
     assert response.status_code == 201
@@ -62,19 +62,19 @@ def test_create_returns_a_running_sandbox(client, monkeypatch):
 def test_two_creates_get_different_ids(client, monkeypatch):
     made = {"n": 0}
 
-    def boot(sandbox_id: str | None = None) -> node_agent.Sandbox:
+    def boot(sandbox_id: str | None = None) -> host_manager.Sandbox:
         made["n"] += 1
         n = made["n"]
         remember_slot(sandbox_id, n)
-        return node_agent.Sandbox(
+        return host_manager.Sandbox(
             id=sandbox_id,
             n=n,
-            ip=node_agent.guest_ip_for(n),
+            ip=host_manager.guest_ip_for(n),
             pid=100 + n,
             boot_seconds=0.5,
         )
 
-    monkeypatch.setattr(node_agent, "create_sandbox", boot)
+    monkeypatch.setattr(host_manager, "create_sandbox", boot)
     first = client.post("/sandboxes")
     second = client.post("/sandboxes")
 
@@ -84,10 +84,10 @@ def test_two_creates_get_different_ids(client, monkeypatch):
 
 
 def test_failed_boot_marks_the_row_destroyed(client, monkeypatch):
-    def boom(sandbox_id: str | None = None) -> node_agent.Sandbox:
+    def boom(sandbox_id: str | None = None) -> host_manager.Sandbox:
         raise RuntimeError("boot failed")
 
-    monkeypatch.setattr(node_agent, "create_sandbox", boom)
+    monkeypatch.setattr(host_manager, "create_sandbox", boom)
     response = client.post("/sandboxes")
 
     assert response.status_code == 500
@@ -99,10 +99,10 @@ def test_failed_boot_marks_the_row_destroyed(client, monkeypatch):
 
 
 def test_full_host_answers_503_and_marks_the_row_destroyed(client, monkeypatch):
-    def full(sandbox_id: str | None = None) -> node_agent.Sandbox:
-        raise node_agent.NoFreeSlotsError("all 250 sandbox slots are in use")
+    def full(sandbox_id: str | None = None) -> host_manager.Sandbox:
+        raise host_manager.NoFreeSlotsError("all 250 sandbox slots are in use")
 
-    monkeypatch.setattr(node_agent, "create_sandbox", full)
+    monkeypatch.setattr(host_manager, "create_sandbox", full)
     response = client.post("/sandboxes")
 
     assert response.status_code == 503
@@ -112,13 +112,13 @@ def test_full_host_answers_503_and_marks_the_row_destroyed(client, monkeypatch):
     assert rows[0].state == SandboxState.DESTROYED
 
 
-def boot_into_slot(sandbox_id: str | None, n: int) -> node_agent.Sandbox:
+def boot_into_slot(sandbox_id: str | None, n: int) -> host_manager.Sandbox:
     """Pretends a boot claimed slot n and came up healthy."""
     remember_slot(sandbox_id, n)
-    return node_agent.Sandbox(
+    return host_manager.Sandbox(
         id=sandbox_id,
         n=n,
-        ip=node_agent.guest_ip_for(n),
+        ip=host_manager.guest_ip_for(n),
         pid=10 + n,
         boot_seconds=1.25,
     )
@@ -132,7 +132,7 @@ def test_list_is_empty_before_any_sandbox(client):
 
 
 def test_list_shows_a_running_sandbox(client, monkeypatch):
-    monkeypatch.setattr(node_agent, "create_sandbox", lambda sandbox_id=None: boot_into_slot(sandbox_id, 4))
+    monkeypatch.setattr(host_manager, "create_sandbox", lambda sandbox_id=None: boot_into_slot(sandbox_id, 4))
     created = client.post("/sandboxes").json()
 
     response = client.get("/sandboxes")
@@ -157,15 +157,15 @@ def test_list_keeps_destroyed_rows_oldest_first(client, monkeypatch):
     times = iter([1_000, 1_000, 2_000, 2_000])
     monkeypatch.setattr(db, "now", lambda: next(times))
 
-    def boot(sandbox_id: str | None = None) -> node_agent.Sandbox:
+    def boot(sandbox_id: str | None = None) -> host_manager.Sandbox:
         return boot_into_slot(sandbox_id, 4)
 
-    def boom(sandbox_id: str | None = None) -> node_agent.Sandbox:
+    def boom(sandbox_id: str | None = None) -> host_manager.Sandbox:
         raise RuntimeError("boot failed")
 
-    monkeypatch.setattr(node_agent, "create_sandbox", boot)
+    monkeypatch.setattr(host_manager, "create_sandbox", boot)
     first = client.post("/sandboxes")
-    monkeypatch.setattr(node_agent, "create_sandbox", boom)
+    monkeypatch.setattr(host_manager, "create_sandbox", boom)
     second = client.post("/sandboxes")
 
     response = client.get("/sandboxes")
@@ -187,7 +187,7 @@ def test_list_keeps_destroyed_rows_oldest_first(client, monkeypatch):
 
 
 def test_get_returns_one_running_sandbox(client, monkeypatch):
-    monkeypatch.setattr(node_agent, "create_sandbox", lambda sandbox_id=None: boot_into_slot(sandbox_id, 4))
+    monkeypatch.setattr(host_manager, "create_sandbox", lambda sandbox_id=None: boot_into_slot(sandbox_id, 4))
     created = client.post("/sandboxes").json()
 
     response = client.get(f"/sandboxes/{created['id']}")
@@ -212,10 +212,10 @@ def test_get_unknown_id_is_not_found(client):
 
 
 def test_get_destroyed_sandbox_is_still_found(client, monkeypatch):
-    def boom(sandbox_id: str | None = None) -> node_agent.Sandbox:
+    def boom(sandbox_id: str | None = None) -> host_manager.Sandbox:
         raise RuntimeError("boot failed")
 
-    monkeypatch.setattr(node_agent, "create_sandbox", boom)
+    monkeypatch.setattr(host_manager, "create_sandbox", boom)
     client.post("/sandboxes")
     sandbox_id = db.list_sandboxes()[0].id
 
@@ -229,7 +229,7 @@ def test_get_destroyed_sandbox_is_still_found(client, monkeypatch):
 
 
 def fake_destroy(calls: list[str]):
-    """Pretends the node agent stopped the VM and freed its slot."""
+    """Pretends the host manager (host_manager.py) stopped the VM and freed its slot."""
     def destroy(sandbox_id: str) -> None:
         calls.append(sandbox_id)
         with closing(db.connect()) as conn:
@@ -238,9 +238,9 @@ def fake_destroy(calls: list[str]):
 
 
 def test_delete_tears_down_a_running_sandbox_once(client, monkeypatch):
-    monkeypatch.setattr(node_agent, "create_sandbox", lambda sandbox_id=None: boot_into_slot(sandbox_id, 4))
+    monkeypatch.setattr(host_manager, "create_sandbox", lambda sandbox_id=None: boot_into_slot(sandbox_id, 4))
     calls: list[str] = []
-    monkeypatch.setattr(node_agent, "destroy_sandbox", fake_destroy(calls))
+    monkeypatch.setattr(host_manager, "destroy_sandbox", fake_destroy(calls))
     created = client.post("/sandboxes").json()
 
     first = client.delete(f"/sandboxes/{created['id']}")
@@ -262,7 +262,7 @@ def test_delete_tears_down_a_running_sandbox_once(client, monkeypatch):
 
 def test_delete_unknown_id_is_not_found(client, monkeypatch):
     calls: list[str] = []
-    monkeypatch.setattr(node_agent, "destroy_sandbox", fake_destroy(calls))
+    monkeypatch.setattr(host_manager, "destroy_sandbox", fake_destroy(calls))
 
     response = client.delete("/sandboxes/unknown")
 
@@ -272,12 +272,12 @@ def test_delete_unknown_id_is_not_found(client, monkeypatch):
 
 
 def test_delete_skips_a_sandbox_that_is_already_destroyed(client, monkeypatch):
-    def boom(sandbox_id: str | None = None) -> node_agent.Sandbox:
+    def boom(sandbox_id: str | None = None) -> host_manager.Sandbox:
         raise RuntimeError("boot failed")
 
-    monkeypatch.setattr(node_agent, "create_sandbox", boom)
+    monkeypatch.setattr(host_manager, "create_sandbox", boom)
     calls: list[str] = []
-    monkeypatch.setattr(node_agent, "destroy_sandbox", fake_destroy(calls))
+    monkeypatch.setattr(host_manager, "destroy_sandbox", fake_destroy(calls))
     client.post("/sandboxes")
     sandbox_id = db.list_sandboxes()[0].id
 
@@ -291,7 +291,7 @@ def test_delete_skips_a_sandbox_that_is_already_destroyed(client, monkeypatch):
 
 def test_delete_tears_down_a_sandbox_that_is_still_starting(client, monkeypatch):
     calls: list[str] = []
-    monkeypatch.setattr(node_agent, "destroy_sandbox", fake_destroy(calls))
+    monkeypatch.setattr(host_manager, "destroy_sandbox", fake_destroy(calls))
     sandbox_id = "sbx_" + "a" * 32
     db.insert_sandbox(sandbox_id)
 
@@ -305,12 +305,12 @@ def test_delete_tears_down_a_sandbox_that_is_still_starting(client, monkeypatch)
 
 def make_running_sandbox(client, monkeypatch) -> str:
     """Creates one running sandbox through the API and returns its id."""
-    monkeypatch.setattr(node_agent, "create_sandbox", lambda sandbox_id=None: boot_into_slot(sandbox_id, 4))
+    monkeypatch.setattr(host_manager, "create_sandbox", lambda sandbox_id=None: boot_into_slot(sandbox_id, 4))
     return client.post("/sandboxes").json()["id"]
 
 
 def scripted_exec(calls: list[dict], result: dict):
-    """Pretends the guest agent ran a command and records what it was asked."""
+    """Pretends the sandbox manager (sandbox_manager/) ran a command and records what it was asked."""
     def run(sandbox_id: str, cmd: str, cwd: str = "/root", background: bool = False, timeout: int = 600) -> dict:
         calls.append({
             "sandbox_id": sandbox_id,
@@ -324,7 +324,7 @@ def scripted_exec(calls: list[dict], result: dict):
 
 
 def guest_http_error(status: int, message: str) -> httpx.HTTPStatusError:
-    """Builds the error httpx raises when the guest agent answers with an HTTP error."""
+    """Builds the error httpx raises when the sandbox manager answers with an HTTP error."""
     request = httpx.Request("POST", "http://guest/exec")
     response = httpx.Response(status, json={"error": message}, request=request)
     return httpx.HTTPStatusError(message, request=request, response=response)
@@ -333,7 +333,7 @@ def guest_http_error(status: int, message: str) -> httpx.HTTPStatusError:
 def test_exec_returns_a_finished_command(client, monkeypatch):
     sandbox_id = make_running_sandbox(client, monkeypatch)
     calls: list[dict] = []
-    monkeypatch.setattr(node_agent, "exec", scripted_exec(calls, {
+    monkeypatch.setattr(host_manager, "exec", scripted_exec(calls, {
         "exit_code": 0,
         "stdout": "Linux\n",
         "stderr": "",
@@ -361,7 +361,7 @@ def test_exec_returns_a_finished_command(client, monkeypatch):
 def test_exec_returns_a_pid_for_a_background_command(client, monkeypatch):
     sandbox_id = make_running_sandbox(client, monkeypatch)
     calls: list[dict] = []
-    monkeypatch.setattr(node_agent, "exec", scripted_exec(calls, {"pid": 481}))
+    monkeypatch.setattr(host_manager, "exec", scripted_exec(calls, {"pid": 481}))
 
     response = client.post(
         f"/sandboxes/{sandbox_id}/exec",
@@ -376,7 +376,7 @@ def test_exec_returns_a_pid_for_a_background_command(client, monkeypatch):
 
 def test_exec_reports_a_command_timeout_in_the_body(client, monkeypatch):
     sandbox_id = make_running_sandbox(client, monkeypatch)
-    monkeypatch.setattr(node_agent, "exec", scripted_exec([], {
+    monkeypatch.setattr(host_manager, "exec", scripted_exec([], {
         "exit_code": 124,
         "stdout": "",
         "stderr": "",
@@ -395,7 +395,7 @@ def test_exec_reports_a_command_timeout_in_the_body(client, monkeypatch):
 
 def test_exec_unknown_id_is_not_found(client, monkeypatch):
     calls: list[dict] = []
-    monkeypatch.setattr(node_agent, "exec", scripted_exec(calls, {}))
+    monkeypatch.setattr(host_manager, "exec", scripted_exec(calls, {}))
 
     response = client.post("/sandboxes/unknown/exec", json={"cmd": "true"})
 
@@ -406,14 +406,14 @@ def test_exec_unknown_id_is_not_found(client, monkeypatch):
 
 def test_exec_rejects_a_sandbox_that_is_not_running(client, monkeypatch):
     calls: list[dict] = []
-    monkeypatch.setattr(node_agent, "exec", scripted_exec(calls, {}))
+    monkeypatch.setattr(host_manager, "exec", scripted_exec(calls, {}))
     starting_id = "sbx_" + "a" * 32
     db.insert_sandbox(starting_id)
 
-    def boom(sandbox_id: str | None = None) -> node_agent.Sandbox:
+    def boom(sandbox_id: str | None = None) -> host_manager.Sandbox:
         raise RuntimeError("boot failed")
 
-    monkeypatch.setattr(node_agent, "create_sandbox", boom)
+    monkeypatch.setattr(host_manager, "create_sandbox", boom)
     client.post("/sandboxes")
     destroyed_id = next(row.id for row in db.list_sandboxes() if row.state == SandboxState.DESTROYED)
 
@@ -430,7 +430,7 @@ def test_exec_rejects_a_sandbox_that_is_not_running(client, monkeypatch):
 def test_exec_rejects_a_request_that_breaks_the_type(client, monkeypatch):
     sandbox_id = make_running_sandbox(client, monkeypatch)
     calls: list[dict] = []
-    monkeypatch.setattr(node_agent, "exec", scripted_exec(calls, {}))
+    monkeypatch.setattr(host_manager, "exec", scripted_exec(calls, {}))
 
     empty_cmd = client.post(f"/sandboxes/{sandbox_id}/exec", json={"cmd": ""})
     huge_timeout = client.post(
@@ -449,7 +449,7 @@ def test_exec_passes_a_guest_client_error_through(client, monkeypatch):
     def reject(*args, **kwargs):
         raise guest_http_error(400, "cwd does not exist: /missing")
 
-    monkeypatch.setattr(node_agent, "exec", reject)
+    monkeypatch.setattr(host_manager, "exec", reject)
     response = client.post(
         f"/sandboxes/{sandbox_id}/exec",
         json={"cmd": "true", "cwd": "/missing"},
@@ -465,7 +465,7 @@ def test_exec_turns_a_dead_guest_into_bad_gateway(client, monkeypatch):
     def down(*args, **kwargs):
         raise httpx.ConnectError("connection refused")
 
-    monkeypatch.setattr(node_agent, "exec", down)
+    monkeypatch.setattr(host_manager, "exec", down)
     response = client.post(f"/sandboxes/{sandbox_id}/exec", json={"cmd": "true"})
 
     assert response.status_code == 502
@@ -491,8 +491,8 @@ class MemoryFiles:
 def test_write_then_read_round_trips_the_file(client, monkeypatch):
     sandbox_id = make_running_sandbox(client, monkeypatch)
     files = MemoryFiles()
-    monkeypatch.setattr(node_agent, "read_file", files.read)
-    monkeypatch.setattr(node_agent, "write_file", files.write)
+    monkeypatch.setattr(host_manager, "read_file", files.read)
+    monkeypatch.setattr(host_manager, "write_file", files.write)
 
     written = client.put(
         f"/sandboxes/{sandbox_id}/files",
@@ -515,8 +515,8 @@ def test_write_then_read_round_trips_the_file(client, monkeypatch):
 def test_write_replaces_the_old_text(client, monkeypatch):
     sandbox_id = make_running_sandbox(client, monkeypatch)
     files = MemoryFiles()
-    monkeypatch.setattr(node_agent, "read_file", files.read)
-    monkeypatch.setattr(node_agent, "write_file", files.write)
+    monkeypatch.setattr(host_manager, "read_file", files.read)
+    monkeypatch.setattr(host_manager, "write_file", files.write)
     url = f"/sandboxes/{sandbox_id}/files"
     client.put(url, params={"path": "/tmp/hello.txt"}, content="first")
     client.put(url, params={"path": "/tmp/hello.txt"}, content="second")
@@ -530,7 +530,7 @@ def test_write_replaces_the_old_text(client, monkeypatch):
 def test_read_missing_file_is_not_found(client, monkeypatch):
     sandbox_id = make_running_sandbox(client, monkeypatch)
     files = MemoryFiles()
-    monkeypatch.setattr(node_agent, "read_file", files.read)
+    monkeypatch.setattr(host_manager, "read_file", files.read)
 
     response = client.get(
         f"/sandboxes/{sandbox_id}/files",
@@ -543,8 +543,8 @@ def test_read_missing_file_is_not_found(client, monkeypatch):
 
 def test_files_unknown_sandbox_is_not_found(client, monkeypatch):
     files = MemoryFiles()
-    monkeypatch.setattr(node_agent, "read_file", files.read)
-    monkeypatch.setattr(node_agent, "write_file", files.write)
+    monkeypatch.setattr(host_manager, "read_file", files.read)
+    monkeypatch.setattr(host_manager, "write_file", files.write)
 
     read = client.get("/sandboxes/unknown/files", params={"path": "/tmp/hello.txt"})
     write = client.put(
@@ -562,15 +562,15 @@ def test_files_unknown_sandbox_is_not_found(client, monkeypatch):
 
 def test_files_reject_a_sandbox_that_is_not_running(client, monkeypatch):
     files = MemoryFiles()
-    monkeypatch.setattr(node_agent, "read_file", files.read)
-    monkeypatch.setattr(node_agent, "write_file", files.write)
+    monkeypatch.setattr(host_manager, "read_file", files.read)
+    monkeypatch.setattr(host_manager, "write_file", files.write)
     starting_id = "sbx_" + "b" * 32
     db.insert_sandbox(starting_id)
 
-    def boom(sandbox_id: str | None = None) -> node_agent.Sandbox:
+    def boom(sandbox_id: str | None = None) -> host_manager.Sandbox:
         raise RuntimeError("boot failed")
 
-    monkeypatch.setattr(node_agent, "create_sandbox", boom)
+    monkeypatch.setattr(host_manager, "create_sandbox", boom)
     client.post("/sandboxes")
     destroyed_id = next(row.id for row in db.list_sandboxes() if row.state == SandboxState.DESTROYED)
 
@@ -591,8 +591,8 @@ def test_files_reject_a_sandbox_that_is_not_running(client, monkeypatch):
 def test_files_require_a_path(client, monkeypatch):
     sandbox_id = make_running_sandbox(client, monkeypatch)
     files = MemoryFiles()
-    monkeypatch.setattr(node_agent, "read_file", files.read)
-    monkeypatch.setattr(node_agent, "write_file", files.write)
+    monkeypatch.setattr(host_manager, "read_file", files.read)
+    monkeypatch.setattr(host_manager, "write_file", files.write)
 
     read = client.get(f"/sandboxes/{sandbox_id}/files")
     write = client.put(f"/sandboxes/{sandbox_id}/files", content="hello")
@@ -608,7 +608,7 @@ def test_write_passes_a_guest_client_error_through(client, monkeypatch):
     def reject(*args, **kwargs):
         raise guest_http_error(400, "?path= must be an absolute path")
 
-    monkeypatch.setattr(node_agent, "write_file", reject)
+    monkeypatch.setattr(host_manager, "write_file", reject)
     response = client.put(
         f"/sandboxes/{sandbox_id}/files",
         params={"path": "tmp/hello.txt"},
@@ -625,7 +625,7 @@ def test_read_turns_a_dead_guest_into_bad_gateway(client, monkeypatch):
     def down(*args, **kwargs):
         raise httpx.ConnectError("connection refused")
 
-    monkeypatch.setattr(node_agent, "read_file", down)
+    monkeypatch.setattr(host_manager, "read_file", down)
     response = client.get(
         f"/sandboxes/{sandbox_id}/files",
         params={"path": "/tmp/hello.txt"},
@@ -638,7 +638,7 @@ def test_read_turns_a_dead_guest_into_bad_gateway(client, monkeypatch):
 def test_write_rejects_bytes_that_are_not_text(client, monkeypatch):
     sandbox_id = make_running_sandbox(client, monkeypatch)
     files = MemoryFiles()
-    monkeypatch.setattr(node_agent, "write_file", files.write)
+    monkeypatch.setattr(host_manager, "write_file", files.write)
 
     response = client.put(
         f"/sandboxes/{sandbox_id}/files",
@@ -880,9 +880,9 @@ def test_a_wrong_key_is_unauthorized(client):
 
 def test_a_turn_token_can_exec_and_use_files_on_its_own_sandbox(client, monkeypatch):
     sandbox_id = make_running_sandbox(client, monkeypatch)
-    monkeypatch.setattr(node_agent, "exec", scripted_exec([], {"exit_code": 0, "stdout": "", "stderr": "", "timed_out": False}))
-    monkeypatch.setattr(node_agent, "read_file", lambda sandbox_id, path: "hi")
-    monkeypatch.setattr(node_agent, "write_file", lambda sandbox_id, path, content: None)
+    monkeypatch.setattr(host_manager, "exec", scripted_exec([], {"exit_code": 0, "stdout": "", "stderr": "", "timed_out": False}))
+    monkeypatch.setattr(host_manager, "read_file", lambda sandbox_id, path: "hi")
+    monkeypatch.setattr(host_manager, "write_file", lambda sandbox_id, path, content: None)
     token = auth.new_turn_token(sandbox_id)
 
     executed = client.post(f"/sandboxes/{sandbox_id}/exec", json={"cmd": "true"}, headers=bearer(token))

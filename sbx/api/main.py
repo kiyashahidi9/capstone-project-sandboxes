@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 
-import node_agent
+import host_manager
 from api import db
 from api.auth import require_admin, require_admin_key_set, require_admin_or_turn
 from api.helpers import (
@@ -17,6 +17,7 @@ from api.helpers import (
     HTTP_CREATED,
     boot_sandbox,
     build_create_response,
+    clean_up_after_restart,
     destroy,
     ensure_running,
     fetch_file,
@@ -64,11 +65,12 @@ ADMIN_OR_TURN = Depends(require_admin_or_turn)   # exec and files: also the turn
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Gets the database ready, then ends turns and settles pauses or resumes a crash cut off, before taking requests."""
+    """Gets the database ready, then settles what a crash or a dead VM left behind, before taking requests."""
     require_admin_key_set()
     db.create_tables()
     runner.recover_interrupted_turns()
     recover_interrupted_changes()
+    clean_up_after_restart()
     stop = threading.Event()
     memory = SampleMemory()
     beat = threading.Thread(
@@ -103,7 +105,7 @@ app = FastAPI(title="sbx", lifespan=lifespan)
 )
 def create_sandbox() -> CreateSandboxResponse:
     """Makes a brand-new sandbox and tells the client how to reach it."""
-    sandbox_id = node_agent.new_sandbox_id()
+    sandbox_id = host_manager.new_sandbox_id()
     db.insert_sandbox(sandbox_id)
     sandbox = boot_sandbox(sandbox_id)
     db.set_state(sandbox_id, SandboxState.RUNNING)

@@ -4,13 +4,13 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-from node_agent import guest_ip_for
+from host_manager import guest_ip_for
 
 
 # Limits for ExecuteRequest (seconds)
-DEFAULT_EXECUTE_TIMEOUT = 600     # same default as the guest agent
+DEFAULT_EXECUTE_TIMEOUT = 600     # same default as the sandbox manager (sandbox_manager/)
 MAX_EXECUTE_TIMEOUT = 3600        # caps how long one request can hold a server thread
-DEFAULT_CWD = "/root"             # same default as the guest agent
+DEFAULT_CWD = "/root"             # same default as the sandbox manager
 
 
 # ---------------------------------------------------------------------------

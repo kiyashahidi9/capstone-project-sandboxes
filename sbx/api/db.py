@@ -9,7 +9,7 @@ from contextlib import closing
 from pathlib import Path
 
 from api.models import Event, EventType, SandboxRow, SandboxState, TurnState
-from node_agent import db_path
+from host_manager import db_path
 
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "db" / "schema.sql"

@@ -13,7 +13,7 @@ from typing import NamedTuple
 
 from pydantic import AwareDatetime
 
-import node_agent
+import host_manager
 from api import db
 from api.models import EventType as StoredEvent
 from api.models import SandboxRow, SandboxState
@@ -103,12 +103,12 @@ def paused_anchor(row: SandboxRow, now: AwareDatetime, policy: Policy) -> VmSamp
 
 def take_cpu_sample(memory: SampleMemory, row: SandboxRow, now: AwareDatetime) -> VmSample | None:
     """One CPU sample. The first reading has no percent yet. A paused VM still gets a PAUSED sample."""
-    usage: int | None = node_agent.read_cpu_usage_usec(row.id)
+    usage: int | None = host_manager.read_cpu_usage_usec(row.id)
     previous: Reading | None = memory.previous.get(row.id)
     percent: float | None = None
     if previous is not None and usage is not None:
         elapsed: float = (now - previous.at).total_seconds()
-        percent = node_agent.cpu_percent(previous.usage_usec, usage, elapsed)
+        percent = host_manager.cpu_percent(previous.usage_usec, usage, elapsed)
     if usage is not None:
         memory.previous[row.id] = Reading(usage_usec=usage, at=now)
 

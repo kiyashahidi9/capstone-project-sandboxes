@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-import node_agent
+import host_manager
 from api import db, helpers
 from api.main import app
 from api.models import EventType, SandboxState
@@ -51,7 +51,7 @@ def test_a_waiting_sandbox_with_no_cpu_history_is_not_paused(tmp_path, monkeypat
     """A question with no samples is not quiet yet, so the beat does not pause it."""
     monkeypatch.setenv("SBX_DB", str(tmp_path / "state.db"))
     db.create_tables()
-    monkeypatch.setattr(node_agent, "read_cpu_usage_usec", lambda sandbox_id: None)
+    monkeypatch.setattr(host_manager, "read_cpu_usage_usec", lambda sandbox_id: None)
     db.insert_sandbox(ID)
     db.set_state(ID, SandboxState.RUNNING)
     db.append_event(ID, EventType.QUESTION, {"text": "which file?"})
@@ -125,7 +125,7 @@ def test_an_idle_quiet_sandbox_is_paused(tmp_path, monkeypatch):
     """A finished turn and a quiet CPU history make the beat call pause. The row changes only there."""
     monkeypatch.setenv("SBX_DB", str(tmp_path / "state.db"))
     db.create_tables()
-    monkeypatch.setattr(node_agent, "read_cpu_usage_usec", lambda sandbox_id: 1_000_000)
+    monkeypatch.setattr(host_manager, "read_cpu_usage_usec", lambda sandbox_id: 1_000_000)
     db.insert_sandbox(ID)
     db.set_state(ID, SandboxState.RUNNING)
     db.append_event(ID, EventType.TURN_FINISHED, {"exit_code": 0})

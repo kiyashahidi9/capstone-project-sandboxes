@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-import node_agent
+import host_manager
 from api import db
 from api.models import EventType, SandboxState
 from control.live import SampleMemory, judge_live, judge_sandbox
@@ -21,7 +21,7 @@ def temp_db(tmp_path, monkeypatch):
 def test_a_question_is_waiting(tmp_path, monkeypatch):
     """A question with no CPU history is WAITING, and the judge does not pause it."""
     temp_db(tmp_path, monkeypatch)
-    monkeypatch.setattr(node_agent, "read_cpu_usage_usec", lambda sandbox_id: None)
+    monkeypatch.setattr(host_manager, "read_cpu_usage_usec", lambda sandbox_id: None)
     db.insert_sandbox(ID)
     db.set_state(ID, SandboxState.RUNNING)
     db.append_event(ID, EventType.QUESTION, {"text": "which file?"})
@@ -37,7 +37,7 @@ def test_a_question_is_waiting(tmp_path, monkeypatch):
 def test_a_user_message_after_pause_resumes(tmp_path, monkeypatch):
     """paused_at is the start of the pause. A later user message asks for RESUME."""
     temp_db(tmp_path, monkeypatch)
-    monkeypatch.setattr(node_agent, "read_cpu_usage_usec", lambda sandbox_id: None)
+    monkeypatch.setattr(host_manager, "read_cpu_usage_usec", lambda sandbox_id: None)
     db.insert_sandbox(ID)
     db.set_state(ID, SandboxState.RUNNING)
     paused_at = int(datetime.now(UTC).timestamp()) - 60
@@ -55,7 +55,7 @@ def test_the_first_cpu_reading_is_not_a_percent(tmp_path, monkeypatch):
     """Two readings make a percent of one core. The first reading is only remembered."""
     temp_db(tmp_path, monkeypatch)
     usage = {"usec": 1_000_000}
-    monkeypatch.setattr(node_agent, "read_cpu_usage_usec", lambda sandbox_id: usage["usec"])
+    monkeypatch.setattr(host_manager, "read_cpu_usage_usec", lambda sandbox_id: usage["usec"])
     db.insert_sandbox(ID)
     db.set_state(ID, SandboxState.RUNNING)
     memory = SampleMemory()
@@ -77,7 +77,7 @@ def test_the_first_cpu_reading_is_not_a_percent(tmp_path, monkeypatch):
 def test_an_open_tool_stays_working(tmp_path, monkeypatch):
     """A tool_started with no tool_completed stays WORKING, even after a question."""
     temp_db(tmp_path, monkeypatch)
-    monkeypatch.setattr(node_agent, "read_cpu_usage_usec", lambda sandbox_id: None)
+    monkeypatch.setattr(host_manager, "read_cpu_usage_usec", lambda sandbox_id: None)
     db.insert_sandbox(ID)
     db.set_state(ID, SandboxState.RUNNING)
     db.append_event(ID, EventType.TOOL_STARTED, {
@@ -95,7 +95,7 @@ def test_an_open_tool_stays_working(tmp_path, monkeypatch):
 
 def test_a_destroyed_sandbox_is_skipped(tmp_path, monkeypatch):
     temp_db(tmp_path, monkeypatch)
-    monkeypatch.setattr(node_agent, "read_cpu_usage_usec", lambda sandbox_id: None)
+    monkeypatch.setattr(host_manager, "read_cpu_usage_usec", lambda sandbox_id: None)
     db.insert_sandbox(ID)
     db.set_state(ID, SandboxState.DESTROYED)
 

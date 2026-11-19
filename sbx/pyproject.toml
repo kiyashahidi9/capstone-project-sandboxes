@@ -19,7 +19,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]   # lets tests `import node_agent` from the repo root
+pythonpath = ["."]   # lets tests `import host_manager` from the repo root
 
 # installs sdk/ into the venv, so `from sdk.sandbox import Sandbox` works from any folder (e.g. /opt/agents)
 [build-system]

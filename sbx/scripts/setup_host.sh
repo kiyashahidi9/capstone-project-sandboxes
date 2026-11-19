@@ -14,7 +14,7 @@
 #   6. Kernel -> ~/fc/vmlinux
 #   7. Base image -> ~/fc/rootfs.ext4: Ubuntu 24.04 + python3, git, curl, nodejs, npm;
 #      SSH key -> ~/fc/vm_key
-#   8. Guest agent baked into the image (install_guest_agent.sh, next to this script)
+#   8. Sandbox manager (sandbox_manager/) baked into the image (install_sandbox_manager.sh, next to this script)
 #   9. Python deps -> sbx/.venv via uv sync (installs uv for you if missing)
 #  10. Checklist
 #
@@ -76,7 +76,7 @@ log "1. checking the machine and the repo"
 (( EUID == 0 ))               || die "run as root: sudo $0"
 [[ $(uname -s) == Linux ]]    || die "needs Linux"
 command -v apt-get >/dev/null || die "needs Debian/Ubuntu (apt-get)"
-for f in "$SCRIPTS/netns.sh" "$SCRIPTS/install_guest_agent.sh" "$SCRIPTS/../guest_agent/guest_agent.py" "$SCRIPTS/../pyproject.toml" "$SCRIPTS/../uv.lock"; do
+for f in "$SCRIPTS/netns.sh" "$SCRIPTS/install_sandbox_manager.sh" "$SCRIPTS/../sandbox_manager/sandbox_manager.py" "$SCRIPTS/../pyproject.toml" "$SCRIPTS/../uv.lock"; do
   [[ -f $f ]] || die "missing $(realpath -m "$f"): run this from a complete clone of the repo"
 done
 # Windows line endings break bash scripts; fix only files that have them.
@@ -177,10 +177,10 @@ else
   cleanup
 fi
 
-# ---------------------------------------------------------------- 8-9: guest agent and python
+# ---------------------------------------------------------------- 8-9: sandbox manager and python
 
-log "8. guest agent"
-"$SCRIPTS/install_guest_agent.sh" install
+log "8. sandbox manager"
+STEP_PREFIX=8 "$SCRIPTS/install_sandbox_manager.sh" install
 
 log "9. python deps (uv sync)"
 chown -R "$REAL_USER": "$REPO"             # the repo and its .venv belong to you, not root
@@ -198,14 +198,14 @@ sudo -u "$REAL_USER" -H "$UV" sync --locked --directory "$(dirname "$VENV")" -q
 log "10. checklist"
 FAILS=0
 check() { local d=$1; shift
-  if "$@" &>/dev/null; then echo "  [x] $d"; else echo "  [ ] $d"; FAILS=$((FAILS + 1)); fi; }
+  if "$@" &>/dev/null; then echo "    [x] $d"; else echo "    [ ] $d"; FAILS=$((FAILS + 1)); fi; }
 check "kvm-ok passes"                          kvm-ok
 check "cgroups v2"                             test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs
 check "firecracker $FC_VERSION on PATH"        bash -c "firecracker --version | grep -q 'Firecracker $FC_VERSION'"
 check "kernel at $FC_DIR/vmlinux"              test -s "$FC_DIR/vmlinux"
 check "base image at $FC_DIR/rootfs.ext4"      test -s "$FC_DIR/rootfs.ext4"
 check "SSH key at $FC_DIR/vm_key"              test -s "$FC_DIR/vm_key"
-check "guest agent in the base image"          "$SCRIPTS/install_guest_agent.sh" verify
+check "sandbox manager in the base image"          "$SCRIPTS/install_sandbox_manager.sh" verify
 check "python venv with dependencies"          "$VENV/bin/python" -c "import fastapi, httpx, pydantic"
 (( FAILS == 0 )) || die "$FAILS check(s) failed"
 

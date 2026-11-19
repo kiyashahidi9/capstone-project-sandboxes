@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Delete the network for sandbox slot N (Build Plan 1d). Called by node_agent.delete_network().
+# Delete the network for sandbox slot N (Build Plan 1d). Called by host_manager.delete_network().
 #
 #   sudo scripts/netns_delete.sh N
 #

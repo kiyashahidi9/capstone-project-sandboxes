@@ -4,7 +4,7 @@ from contextlib import closing
 
 import pytest
 
-import node_agent
+import host_manager
 from api import db
 from api.models import SandboxState
 
@@ -30,7 +30,7 @@ def clock(monkeypatch):
 
 
 def claim_slot(n, sandbox_id):
-    """Gives a sandbox a network slot the way node_agent.py does."""
+    """Gives a sandbox a network slot the way host_manager.py does."""
     with closing(db.connect()) as conn:
         conn.execute("INSERT INTO slots (n, sandbox_id) VALUES (?, ?)", (n, sandbox_id))
 
@@ -46,8 +46,8 @@ def slots_table_sql(schema_sql):
 
 # --- setup ------------------------------------------------------------------
 
-def test_schema_file_matches_node_agent_slots_schema():
-    assert slots_table_sql(db.SCHEMA_PATH.read_text()) == slots_table_sql(node_agent.SLOTS_SCHEMA)
+def test_schema_file_matches_host_manager_slots_schema():
+    assert slots_table_sql(db.SCHEMA_PATH.read_text()) == slots_table_sql(host_manager.SLOTS_SCHEMA)
 
 
 def test_create_tables_is_safe_to_run_twice():

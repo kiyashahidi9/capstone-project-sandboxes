@@ -4,9 +4,9 @@ import time
 
 import pytest
 
-import node_agent
-from node_agent import (
-    create_sandbox, destroy_sandbox, exec, guest_agent_is_healthy, is_sandbox_running,
+import host_manager
+from host_manager import (
+    create_sandbox, destroy_sandbox, exec, sandbox_manager_is_healthy, is_sandbox_running,
     list_host_sandboxes, new_sandbox_id, pause_sandbox, read_file, resume_sandbox, write_file,
 )
 
@@ -21,6 +21,8 @@ COUNTER_COMMAND = (
     "i=$((i+1)); sleep 1; done"
 )
 COUNTER_WAIT = 3                                       # seconds, long enough for the count to rise
+CLOCK_PAUSE_WAIT = 10                                  # seconds paused: a clock left unset would be this far behind
+CLOCK_TOLERANCE = 2                                    # seconds; `date +%s` rounds down and exec takes a moment
 
 
 def start_counter(sandbox_id):
@@ -99,16 +101,34 @@ def test_pause_and_resume_keep_a_running_process():
 
         pause_timings = pause_sandbox(sbx.id)
         assert firecracker_pids(sbx.id) == ""
-        assert os.path.exists(node_agent.vmstate_path(sbx.id))
-        assert os.path.exists(node_agent.mem_path(sbx.id))
+        assert os.path.exists(host_manager.vmstate_path(sbx.id))
+        assert os.path.exists(host_manager.mem_path(sbx.id))
 
         resumed = resume_sandbox(sbx.id)
         print(f"\npause: {pause_timings}\nresume: {resumed}")
         assert resumed["pid"] != sbx.pid
-        assert guest_agent_is_healthy(sbx.id)
+        assert sandbox_manager_is_healthy(sbx.id)
 
         time.sleep(COUNTER_WAIT)
         assert read_counter(sbx.id) > count_before_pause
+    finally:
+        destroy_sandbox(sbx.id)
+
+
+def guest_clock_seconds(sandbox_id):
+    """Return the guest's wall-clock time, in whole seconds since 1970."""
+    return int(exec(sandbox_id, "date +%s")["stdout"].strip())
+
+
+def test_resume_sets_the_guest_clock_to_the_hosts_time():
+    """Without /clock the guest would wake up CLOCK_PAUSE_WAIT seconds behind (4b full)."""
+    sbx = create_sandbox()
+    try:
+        pause_sandbox(sbx.id)
+        time.sleep(CLOCK_PAUSE_WAIT)
+        resumed = resume_sandbox(sbx.id)
+        assert resumed["clock_set"] is True
+        assert abs(guest_clock_seconds(sbx.id) - time.time()) < CLOCK_TOLERANCE
     finally:
         destroy_sandbox(sbx.id)
 
@@ -121,9 +141,9 @@ def test_destroy_a_paused_sandbox():
     finally:
         destroy_sandbox(sbx.id)
     assert firecracker_pids(sbx.id) == ""
-    assert not os.path.exists(node_agent.cgroup_dir(sbx.id))
-    assert node_agent.find_slot(sbx.id) is None
-    assert not os.path.exists(node_agent.sandbox_dir(sbx.id))
+    assert not os.path.exists(host_manager.cgroup_dir(sbx.id))
+    assert host_manager.find_slot(sbx.id) is None
+    assert not os.path.exists(host_manager.sandbox_dir(sbx.id))
 
 
 def test_nothing_is_left_behind():
@@ -136,17 +156,17 @@ def test_nothing_is_left_behind():
     leftover_processes = subprocess.run(["pgrep", "firecracker"], capture_output=True, text=True).stdout
 
     assert namespaces.strip() == ""
-    cgroup_root = node_agent.CGROUP_ROOT
+    cgroup_root = host_manager.CGROUP_ROOT
     leftover_cgroups = [
         name for name in os.listdir(cgroup_root)
         if os.path.isdir(f"{cgroup_root}/{name}")
     ]
 
     leftover_files = [
-        name for name in os.listdir(node_agent.SANDBOXES_ROOT)
-        if not name.startswith("state.db")
+        name for name in os.listdir(host_manager.SANDBOXES_ROOT)
+        if not name.startswith("state.db")              # the database (and its -wal/-shm files) stays
     ]
     assert leftover_files == []
-    assert node_agent.slot_holders() == []
+    assert host_manager.slot_holders() == []              # every slot was released
     assert leftover_cgroups == []
     assert leftover_processes.strip() == ""
