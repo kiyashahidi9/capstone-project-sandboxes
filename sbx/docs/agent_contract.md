@@ -57,7 +57,7 @@ Order for one model round:
 
 A text answer is `{"type": "llm_response", "text": "..."}`. A write stores `{"path": "...", "content": "..."}` as its `result`. `llm_request` carries the model, the system prompt, the tool schemas, and the messages. It does not carry an API key.
 
-Playback walks these rows in order and rebuilds the chat from `user_message`, `llm_response`, and `tool_completed`. It uses the stored return. It does not call the model again, and it does not run the tool again. Plain text stays `agent_output`.
+The steps are stored so a run can be inspected, or played back later from `user_message`, `llm_response` and `tool_completed` without calling the model or running the tool again. Nothing plays them back yet. The sleep judge uses `tool_started` and `tool_completed`: a tool call with no completion counts as working, so the sandbox isn't paused mid-tool. Plain text stays `agent_output`.
 
 ## Example
 

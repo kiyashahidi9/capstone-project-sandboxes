@@ -33,14 +33,16 @@ On the GCP host the same suite is the integration run. `sudo` is required: `.env
 
 ```bash
 cd ~/capstone-project-sandboxes
-git fetch && git checkout trackb-car && git pull
+git fetch && git checkout final-car && git pull
 cd sbx
 sudo scripts/setup_host.sh
 sudo scripts/setup_agents.sh
+sudo systemctl stop sbx-api
 sudo .venv/bin/pytest -q
+sudo systemctl start sbx-api
 ```
 
-This run should not skip `tests/test_host_manager.py`. No failures. The longer host checklist (pause, chat, crash recovery) is `Bicycle end-to-end test - every track on the GCP host.md` in this directory. Check this branch out instead of `track-c-bicycle`.
+This run should not skip `tests/test_host_manager.py`. No failures. The full host checklist (install, SDK, chat, the stream, pause, the bucket, reboot) is `sbx/Track C car end-to-end test - new client from scratch on GCP.md`. This branch is merged into `final-car`.
 
 ## Stream test on the GCP host
 
@@ -52,18 +54,12 @@ The host is `sbx-node-1` in `us-east1-b`. This test signs a client up for the ev
 gcloud compute instances start sbx-node-1 --zone=us-east1-b
 ```
 
-**VM** (leave the API running):
-
-```bash
-gcloud compute ssh sbx-node-1 --zone=us-east1-b
-cd ~/capstone-project-sandboxes/sbx
-sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
-```
+The API runs on the VM as the `sbx-api` service, so nothing needs starting there.
 
 **Laptop**, a second terminal, with the tunnel. Leave it open.
 
 ```bash
-gcloud compute ssh sbx-node-1 --zone=us-east1-b -- -N -L 8000:localhost:8000
+gcloud compute ssh sbx@sbx-node-1 --zone=us-east1-b -- -N -L 8000:localhost:8000
 ```
 
 **Laptop**, from `sbx/`. The repo-root `.env` needs the same `SANDBOX_ADMIN_KEY` as the VM, and `SANDBOX_API=http://localhost:8000`. No OpenAI key on the laptop. The host already has one, and the agent runs there.

@@ -1,54 +1,45 @@
-# Milestone 2 acceptance test
+# Agent path acceptance test
 
-A person who didn't write the code runs this by hand on a fresh host. Every step must pass.
+A person who didn't write the code runs this by hand on a host set up with `install.sh`. Every step must pass. For a full from-scratch run (install, SDK, stream, bucket, reboot), use `sbx/Track C car end-to-end test - new client from scratch on GCP.md` instead.
 
-In Milestone 2 the agent runs **on the host**: the laptop only runs a thin chat app, and the VM runs both the API server and the agent.
+The agent runs **on the host**: the laptop only runs a thin chat app, and the VM runs both the API (as the `sbx-api` service) and the agent.
 
 You use 3 terminals, all opened on your laptop:
 
 | Terminal | Runs on | How to open it | Used for |
 |---|---|---|---|
-| **VM-1** | The VM | `gcloud compute ssh <vm> --zone=<zone>` | Setup, then the API server |
-| **VM-2** | The VM | `gcloud compute ssh <vm> --zone=<zone> -- -L 8000:localhost:8000` | Checks (`curl`, `ls`, `pgrep`). Also tunnels port 8000 to your laptop, so keep it open. |
+| **VM-1** | The VM | `gcloud compute ssh sbx@<vm> --zone=<zone>` | The API's log, and the guardrail run |
+| **VM-2** | The VM | `gcloud compute ssh sbx@<vm> --zone=<zone> -- -L 8000:localhost:8000` | Checks (`curl`, `ls`, `pgrep`). Also tunnels port 8000 to your laptop, so keep it open. |
 | **Laptop** | Your laptop | A normal terminal | The chat app |
 
 Replace `<vm>` and `<zone>` with your VM's name and zone (e.g. `sbx-node-1`, `us-east1-b`).
 
 ## Before you start
 
-**VM-1:** get the latest code and set up the host. On a fresh VM, first run `git clone https://github.com/kiyashahidi9/capstone-project-sandboxes.git ~/capstone-project-sandboxes`.
+**Laptop:** set up the host from the `final-car` branch (see `readme/setup_README.md`). Save the admin key it prints.
 
 ```bash
-cd ~/capstone-project-sandboxes
-git checkout track-a && git pull
-cp .env.example .env          # then set SANDBOX_ADMIN_KEY and OPENAI_API_KEY; keep AGENT_CMD as it is
-cd sbx
-sudo scripts/setup_host.sh    # every checklist line must show [x]
-sudo scripts/setup_agents.sh  # locks the agent down; every checklist line must show [x]
-pgrep firecracker             # must print nothing (no sandboxes running)
+git checkout final-car && git pull
+sbx/scripts/install.sh
+printf 'SANDBOX_ADMIN_KEY=%s\nSANDBOX_API=http://localhost:8000\n' "<the admin key>" > .env
+cd sbx && uv sync
 ```
 
-Make the admin key with `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`. After `setup_agents.sh`, `.env` is root only. No edit is needed, but any later change needs `sudo nano ../.env`.
+The laptop needs the admin key but no OpenAI key.
 
-**Laptop:** get the same code and install dependencies. The laptop needs the admin key but no OpenAI key.
+**VM-1:**
 
 ```bash
-cd capstone-project-sandboxes
-git checkout track-a && git pull
-cp .env.example .env          # then set SANDBOX_ADMIN_KEY to the same value as on the VM
-cd sbx
-uv sync
+systemctl is-active sbx-api      # active
+pgrep firecracker                # must print nothing (no sandboxes running)
+sudo journalctl -u sbx-api -f    # leave this running to watch the API
 ```
 
-- [ ] Both setup scripts show all `[x]`, `pgrep firecracker` prints nothing, and the VM's `.env` has `SANDBOX_ADMIN_KEY`, `OPENAI_API_KEY` and `AGENT_CMD`.
+- [ ] `install.sh` ends with `Done.`, the service is `active`, and `pgrep firecracker` prints nothing.
 
-## 1. Start the API
+## 1. The API
 
-**VM-1** (from `sbx/`, leave running):
-
-```bash
-sudo .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
-```
+It already runs as the `sbx-api` service, so there's nothing to start.
 
 ## 2. Open VM-2 and start the chat
 
@@ -124,9 +115,10 @@ curl http://<ip>:3000/health
 
 A fake agent tries to break out of the lockdown. Every attempt must fail.
 
-**VM-1:** stop the API (Ctrl+C), then start it with the guardrail agent instead of the example agent (from `sbx/`):
+**VM-1:** stop the log (Ctrl+C) and the service, then start the API by hand with the guardrail agent instead of the example agent (from `~/capstone-project-sandboxes/sbx`):
 
 ```bash
+sudo systemctl stop sbx-api
 sudo env AGENT_CMD="/opt/agents/.venv/bin/python /opt/agents/guardrail_agent.py"   .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -146,7 +138,7 @@ It prints one line per check and ends with `all checks passed`:
 - [ ] `PASS` cat the `.env` file → permission denied.
 - [ ] `PASS` whoami prints `sbx-agent`.
 
-**VM-1:** stop the API and start it again the normal way (step 1).
+**VM-1:** stop the hand-started API (Ctrl+C), then start the service again: `sudo systemctl start sbx-api`.
 
 ## 7. Pause and resume
 
@@ -172,19 +164,8 @@ ls /var/sbx                    # only state.db (and state.db-wal / state.db-shm)
 
 ## 9. Stop
 
-**VM-1:** Ctrl+C. If it doesn't stop, press Ctrl+C again (the first one waits for open requests to finish).
-
-Still running, or VM-1 won't respond? **VM-2:**
-
-```bash
-sudo pkill -f "uvicorn api.main:app"      # add -9 if it's still running after a few seconds
-pgrep -af uvicorn                         # nothing
-```
-
-If VM-1 ignores all keys, the SSH session is frozen: press Enter, then type `~.` to close it.
-
-**VM-2:** `exit`.
+Nothing to stop: the API keeps running as a service. **VM-1:** Ctrl+C to leave the log. **VM-2:** `exit`.
 
 ## Done when
 
-- [ ] Someone who didn't write the code runs this on a fresh host and every box is ticked.
+- [ ] Someone who didn't write the code runs this on a host set up with `install.sh` and every box is ticked.
