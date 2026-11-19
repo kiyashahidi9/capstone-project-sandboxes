@@ -14,12 +14,15 @@ order the client received them, through turn_finished or turn_failed.
 from __future__ import annotations
 
 import json
+import os
 import queue
 import sys
 import threading
 from pathlib import Path
 
 import httpx
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # sbx/, so `import sdk` works
 
 from sdk.sandbox import Sandbox, SandboxError
 
