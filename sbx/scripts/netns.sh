@@ -23,7 +23,8 @@
 #   2. tap0 inside it with 172.16.0.1/30
 #   3. veth pair host <-> ns, ns default route via the host end
 #   4. NAT inside the ns: guest IP <-> clone address
-#   5. host: route clone address into the ns, forwarding + MASQUERADE to the internet
+#   5. host: route clone address into the ns, forwarding + MASQUERADE to the internet,
+#      except Google's metadata server, which would hand guests the VM's bucket credentials
 #
 # Usage (as root):
 #   netns.sh start N            create sbxN if needed, boot a VM in it, set its route
@@ -53,6 +54,7 @@ readonly TAP=tap0
 readonly TAP_IP=172.16.0.1
 readonly GUEST_IP=172.16.0.2
 readonly CLONE_NET=10.201.0.0/16
+readonly METADATA_IP=169.254.169.254   # GCP metadata server: gives out the sbx-host service account's token
 readonly GUEST_MAC=06:00:AC:10:00:02   # the test image derives 172.16.0.2 from this MAC
 
 # Kernel, rootfs and key from 1a/1b. Under sudo, $HOME is /root, so use the real user's home.
@@ -135,6 +137,8 @@ step5_host() {
   ipt_ensure nat    POSTROUTING -s "$CLONE_NET" -o "$wan" -j MASQUERADE
   ipt_ensure filter FORWARD -s "$CLONE_NET" -j ACCEPT
   ipt_ensure filter FORWARD -d "$CLONE_NET" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  # added last: ipt_ensure inserts at the top, so this DROP always sits above the ACCEPTs
+  ipt_ensure filter FORWARD -s "$CLONE_NET" -d "$METADATA_IP" -j DROP
 }
 
 cmd_create() {
@@ -268,6 +272,7 @@ cmd_verify() {
   check "MASQUERADE $CLONE_NET out $wan"     iptables -t nat -C POSTROUTING -s "$CLONE_NET" -o "$wan" -j MASQUERADE
   check "FORWARD allows $CLONE_NET out"      iptables -C FORWARD -s "$CLONE_NET" -j ACCEPT
   check "FORWARD allows replies back"        iptables -C FORWARD -d "$CLONE_NET" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  check "FORWARD drops $CLONE_NET to $METADATA_IP" iptables -C FORWARD -s "$CLONE_NET" -d "$METADATA_IP" -j DROP
 
   echo " live (VM running)"
   if [[ -n $(ip netns pids "$NS" 2>/dev/null) ]]; then
@@ -276,6 +281,7 @@ cmd_verify() {
     check "host can ssh to $CLONE_IP"        guest_ssh true
     check "guest has default via $TAP_IP"    out_has "via $TAP_IP " guest_ssh ip route show default
     check "guest can reach the internet"     guest_ssh ping -c1 -W3 1.1.1.1
+    check "guest can't reach metadata server" not guest_ssh curl -s --max-time 3 -H "Metadata-Flavor: Google" "http://$METADATA_IP/"
   else
     echo "  [-] skipped: nothing running in $NS"
   fi
@@ -312,6 +318,7 @@ cmd_host_teardown() {
   ipt_remove nat    POSTROUTING -s "$CLONE_NET" -o "$wan" -j MASQUERADE
   ipt_remove filter FORWARD -s "$CLONE_NET" -j ACCEPT
   ipt_remove filter FORWARD -d "$CLONE_NET" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  ipt_remove filter FORWARD -s "$CLONE_NET" -d "$METADATA_IP" -j DROP
   log "removed shared host rules (net.ipv4.ip_forward left as is)"
 }
 

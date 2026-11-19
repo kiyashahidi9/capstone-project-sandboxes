@@ -18,6 +18,9 @@ from api.helpers import (
     boot_sandbox,
     build_create_response,
     clean_up_after_restart,
+    pause_running_sandboxes,
+    restart_unfinished_uploads,
+    run_cleanup_until_stopped,
     destroy,
     ensure_running,
     fetch_file,
@@ -65,12 +68,13 @@ ADMIN_OR_TURN = Depends(require_admin_or_turn)   # exec and files: also the turn
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Gets the database ready, then settles what a crash or a dead VM left behind, before taking requests."""
+    """Gets ready and settles what a crash or reboot left behind; on shutdown, pauses every running sandbox."""
     require_admin_key_set()
     db.create_tables()
     runner.recover_interrupted_turns()
     recover_interrupted_changes()
     clean_up_after_restart()
+    restart_unfinished_uploads()
     stop = threading.Event()
     memory = SampleMemory()
     beat = threading.Thread(
@@ -83,11 +87,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.beat_memory = memory
     app.state.beat_thread = beat
     beat.start()
+    cleanup = start_cleanup_thread(stop)
     try:
         yield
     finally:
         stop.set()
-        beat.join(timeout=2)
+        beat.join(timeout=2)   # first, so the heartbeat can't resume anything while we pause
+        cleanup.join(timeout=2)
+        pause_running_sandboxes()
+
+
+def start_cleanup_thread(stop: threading.Event) -> threading.Thread:
+    """Starts the hourly check that deletes forgotten sandboxes (6b), ending when the server shuts down."""
+    cleanup = threading.Thread(target=run_cleanup_until_stopped, args=(stop,), name="sbx-cleanup", daemon=True)
+    cleanup.start()
+    return cleanup
 
 
 app = FastAPI(title="sbx", lifespan=lifespan)

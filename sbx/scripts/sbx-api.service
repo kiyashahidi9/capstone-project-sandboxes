@@ -1,0 +1,21 @@
+# sbx-api.service - runs the sandbox API at boot and after a crash (Build Plan 6a)
+# Installed by scripts/install.sh to /etc/systemd/system/. Paths are fixed: every install uses the sbx user.
+# Runs as root: it starts Firecracker, sets up networks and calls systemd-run.
+
+[Unit]
+Description=Sandbox API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/home/sbx/capstone-project-sandboxes/sbx
+# a service has no SUDO_USER, so host_manager needs to be told where the kernel and base image are
+Environment=SBX_FC_DIR=/home/sbx/fc
+# 127.0.0.1 only: reached through an SSH tunnel. One worker: the locks live in this one process.
+ExecStart=/home/sbx/capstone-project-sandboxes/sbx/.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+# on stop (and VM shutdown) the API pauses every running sandbox first, ~10-15 s each (6c)
+TimeoutStopSec=300
+
+[Install]
+WantedBy=multi-user.target

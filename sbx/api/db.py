@@ -8,7 +8,7 @@ import time
 from contextlib import closing
 from pathlib import Path
 
-from api.models import Event, EventType, SandboxRow, SandboxState, TurnState
+from api.models import Event, EventType, SandboxRow, SandboxState, TurnState, UploadStatus
 from host_manager import db_path
 
 
@@ -18,7 +18,7 @@ DB_BUSY_TIMEOUT = 5.0             # seconds a writer waits for another writer be
 # Sandboxes joined to slots; LEFT JOIN keeps sandboxes that hold no slot (their n is NULL).
 SELECT_SANDBOXES = """
     SELECT sandboxes.id, sandboxes.state, sandboxes.created_at, sandboxes.updated_at,
-           sandboxes.turn_state, sandboxes.snapshot_dir, sandboxes.paused_at, slots.n
+           sandboxes.turn_state, sandboxes.snapshot_dir, sandboxes.paused_at, sandboxes.upload_status, slots.n
     FROM sandboxes
     LEFT JOIN slots ON slots.sandbox_id = sandboxes.id
 """
@@ -182,6 +182,15 @@ def transition(
             (to_state, now(), *fields.values(), sandbox_id, *from_states),
         )
     return cursor.rowcount == 1
+
+
+def set_upload_status(sandbox_id: str, status: UploadStatus) -> None:
+    """Records how far the copy of the sandbox's latest snapshot to the bucket has got."""
+    with closing(connect()) as conn:
+        conn.execute(
+            "UPDATE sandboxes SET upload_status = ? WHERE id = ?",
+            (status, sandbox_id),
+        )
 
 
 def set_turn_state(sandbox_id: str, turn_state: TurnState) -> None:

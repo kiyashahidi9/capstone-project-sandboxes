@@ -147,6 +147,69 @@ def test_wait_until_times_out():
         host_manager.wait_until(lambda: False, timeout=0.1, interval=0.02, waiting_for="the thing")
 
 
+# --- after a host reboot (6c): network and cgroup are wiped, the slot is not --------
+
+def test_ensure_network_recreates_a_namespace_a_reboot_wiped(tmp_path, monkeypatch):
+    """Checks a missing network namespace is created again for the sandbox's slot."""
+    created = []
+    monkeypatch.setattr(host_manager, "NETNS_DIR", str(tmp_path))
+    monkeypatch.setattr(host_manager, "create_network", created.append)
+
+    host_manager.ensure_network(3)
+
+    assert created == [3]
+
+
+def test_ensure_network_leaves_an_existing_namespace_alone(tmp_path, monkeypatch):
+    """Checks a namespace that's still there isn't created twice."""
+    created = []
+    (tmp_path / "sbx3").touch()
+    monkeypatch.setattr(host_manager, "NETNS_DIR", str(tmp_path))
+    monkeypatch.setattr(host_manager, "create_network", created.append)
+
+    host_manager.ensure_network(3)
+
+    assert created == []
+
+
+def test_ensure_cgroup_recreates_the_folders_a_reboot_wiped(tmp_path, monkeypatch):
+    """Checks the sandbox's cgroup folder, and its parent, are made again; a second call changes nothing."""
+    monkeypatch.setattr(host_manager, "CGROUP_ROOT", str(tmp_path / "sandboxes"))
+
+    host_manager.ensure_cgroup(ID_A)
+    host_manager.ensure_cgroup(ID_A)
+
+    assert (tmp_path / "sandboxes" / ID_A).is_dir()
+
+
+def skip_network_and_cgroup(monkeypatch):
+    """Makes resume act as if the sandbox's network and cgroup are still there, so no real ones get made."""
+    monkeypatch.setattr(host_manager, "ensure_network", lambda n: None)
+    monkeypatch.setattr(host_manager, "ensure_cgroup", lambda sandbox_id: None)
+
+
+def test_resume_recreates_network_and_cgroup_before_starting_the_vm(monkeypatch):
+    """Checks resume rebuilds what a reboot wiped before Firecracker needs it."""
+    calls = []
+    monkeypatch.setattr(host_manager, "require_resumable_files", lambda sandbox_id: None)
+    monkeypatch.setattr(host_manager, "require_stopped", lambda sandbox_id: None)
+    monkeypatch.setattr(host_manager, "require_slot", lambda sandbox_id: 3)
+    monkeypatch.setattr(host_manager, "remove_socket", lambda sandbox_id: None)
+    monkeypatch.setattr(host_manager, "ensure_network", lambda n: calls.append("network"))
+    monkeypatch.setattr(host_manager, "ensure_cgroup", lambda sandbox_id: calls.append("cgroup"))
+    monkeypatch.setattr(host_manager, "kill_firecracker", lambda sandbox_id: None)
+
+    def start_vm_process(sandbox_id, n):
+        calls.append("start")
+        raise RuntimeError("stop the test here")
+
+    monkeypatch.setattr(host_manager, "start_vm_process", start_vm_process)
+
+    with pytest.raises(RuntimeError, match="stop the test here"):
+        host_manager.resume_sandbox(ID_A)
+    assert calls == ["network", "cgroup", "start"]
+
+
 # --- create_sandbox / destroy_sandbox ------------------------------------------
 
 def test_create_sandbox_cleans_up_when_a_step_fails(fake_sandboxes_root, monkeypatch):
@@ -374,6 +437,7 @@ def test_resume_raises_when_a_file_is_missing(fake_sandboxes_root, monkeypatch, 
 def test_resume_kills_firecracker_and_keeps_the_snapshot_if_a_step_fails(fake_sandboxes_root, monkeypatch):
     """The snapshot is the only copy of the sandbox, so a failed resume must leave it for a retry."""
     killed = []
+    skip_network_and_cgroup(monkeypatch)
     monkeypatch.setattr(host_manager, "start_vm_process", lambda sandbox_id, n: 4242)
     monkeypatch.setattr(host_manager, "kill_firecracker", killed.append)
 
@@ -437,6 +501,7 @@ def test_set_clock_sends_the_hosts_time(fake_guest, monkeypatch):
 def resumable(fake_sandboxes_root, monkeypatch):
     """Make resume_sandbox run without Firecracker, recording the order of its steps."""
     steps = []
+    skip_network_and_cgroup(monkeypatch)
     monkeypatch.setattr(host_manager, "start_vm_process", lambda sandbox_id, n: steps.append("start") or 4242)
     monkeypatch.setattr(host_manager, "restore_vm", lambda sandbox_id: steps.append("load"))
     monkeypatch.setattr(host_manager, "wait_for_sandbox_manager", lambda sandbox_id: steps.append("health"))

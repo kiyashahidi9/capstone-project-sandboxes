@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from contextlib import contextmanager
 from typing import Callable, Iterator
@@ -10,6 +11,7 @@ from fastapi import HTTPException
 
 import locks
 import host_manager
+import uploads
 from api import db
 from runner import runner
 from api.models import (
@@ -20,10 +22,15 @@ from api.models import (
     SandboxInfo,
     SandboxRow,
     SandboxState,
+    UploadStatus,
 )
 
 
 logger = logging.getLogger(__name__)
+
+DELETE_AFTER_ENV = "DELETE_PAUSED_AFTER_DAYS"   # in .env; blank (the default) never deletes anything
+SECONDS_PER_DAY = 24 * 60 * 60
+CLEANUP_INTERVAL_SECONDS = 60 * 60               # how often to look for forgotten sandboxes
 
 HTTP_NOT_FOUND = 404
 HTTP_CONFLICT = 409
@@ -137,8 +144,10 @@ def is_destroyed(row: SandboxRow) -> bool:
 
 def tear_down(sandbox_id: str) -> None:
     """Removes a sandbox from the host, then records it as destroyed."""
+    uploads.stop_upload(sandbox_id)   # its snapshot files are about to be deleted
     host_manager.destroy_sandbox(sandbox_id)
     db.set_state(sandbox_id, SandboxState.DESTROYED)
+    run_logging_failure(uploads.delete_bucket_copies, sandbox_id)   # last: an unreachable bucket can't block a delete
 
 
 def destroy(sandbox_id: str) -> None:
@@ -161,6 +170,7 @@ def pause(sandbox_id: str) -> SandboxRow:
         if not db.transition(sandbox_id, [SandboxState.RUNNING], SandboxState.PAUSING):
             raise conflict(NOT_RUNNING)
         save_snapshot(sandbox_id)
+        uploads.start_upload(sandbox_id)   # still under the lock, so no resume can start the VM before the upload is known
     return require_sandbox(sandbox_id)
 
 
@@ -217,12 +227,20 @@ def resume_locked(sandbox_id: str) -> None:
     """Restarts a paused sandbox from its snapshot, answering 409 or 500 if it can't; caller holds the lock."""
     if not db.transition(sandbox_id, [SandboxState.PAUSED], SandboxState.RESUMING):
         raise conflict(NOT_PAUSED)
+    uploads.stop_upload(sandbox_id)   # the resumed VM writes to rootfs.ext4, so no upload may still be reading it
     try:
+        restore_if_missing(sandbox_id)
         host_manager.resume_sandbox(sandbox_id)
     except Exception as error:
         settle_resuming(sandbox_id)
         raise HTTPException(status_code=HTTP_SERVER_ERROR, detail=RESUME_FAILED) from error
     mark_resumed(sandbox_id)
+
+
+def restore_if_missing(sandbox_id: str) -> None:
+    """Fetches the snapshot from the bucket when the local copy is gone or broken, so resume can still go on."""
+    if not snapshot_is_complete(sandbox_id):
+        uploads.restore_from_bucket(sandbox_id)
 
 
 def mark_resumed(sandbox_id: str) -> None:
@@ -302,22 +320,33 @@ def is_gone(row: SandboxRow) -> bool:
     if row.state == SandboxState.STARTING:
         return True   # a crash cut off the create, so nobody was ever given this ID
     if row.state == SandboxState.PAUSED:
-        return not snapshot_is_complete(row.id)   # no VM on purpose: only a broken snapshot means it's lost
+        # no VM on purpose: it's lost only if neither the host nor the bucket has a whole snapshot
+        return not snapshot_is_complete(row.id) and not bucket_can_restore(row.id)
     return not host_manager.is_sandbox_running(row.id)
 
 
-def run_logging_failure(step: Callable[[str], None], sandbox_id: str) -> None:
-    """Runs one cleanup step on a sandbox, logging a failure instead of stopping the server from starting."""
+def bucket_can_restore(sandbox_id: str) -> bool:
+    """Checks whether the bucket can still restore the sandbox; an unreachable bucket counts as yes."""
+    try:
+        return uploads.has_complete_copy(sandbox_id)
+    except Exception:
+        logger.exception("couldn't check the bucket for %s; keeping it", sandbox_id)
+        return True
+
+
+def run_logging_failure(step: Callable[[str], object], sandbox_id: str) -> None:
+    """Runs one step on a sandbox, logging a failure instead of stopping the steps for the other sandboxes."""
     try:
         step(sandbox_id)
     except Exception:
-        logger.exception("startup cleanup failed for %s; leaving it as it is", sandbox_id)
+        logger.exception("%s failed for %s; leaving it as it is", step.__name__, sandbox_id)
 
 
 def destroy_gone_sandboxes() -> None:
     """Destroys every sandbox the database calls live but that can no longer be used."""
     for row in db.list_live_sandboxes():
         if is_gone(row):
+            logger.warning("lost sandbox %s: it was %s, but its VM or snapshot is gone", row.id, row.state.value)
             run_logging_failure(tear_down, row.id)
 
 
@@ -333,6 +362,70 @@ def clean_up_after_restart() -> None:
     """On startup, destroys sandboxes whose VM or snapshot is gone, then leftovers nothing tracks."""
     destroy_gone_sandboxes()
     destroy_untracked_sandboxes()
+
+
+def needs_upload(row: SandboxRow) -> bool:
+    """Checks whether a sandbox is paused but its bucket copy isn't complete (cut off, failed, or never made)."""
+    return row.state == SandboxState.PAUSED and row.upload_status != UploadStatus.DONE
+
+
+def restart_unfinished_uploads() -> None:
+    """On startup, copies again every paused sandbox whose bucket copy a shutdown or failure left incomplete."""
+    for row in db.list_live_sandboxes():
+        if needs_upload(row):
+            with locks.lock_for(row.id):   # start_upload expects the lock held, as in pause()
+                uploads.start_upload(row.id)
+
+
+# ---------------------------------------------------------------------------
+# Deleting forgotten sandboxes (6b): off unless DELETE_PAUSED_AFTER_DAYS is set
+# ---------------------------------------------------------------------------
+
+def delete_after_days() -> int | None:
+    """Gives how many days a sandbox may stay paused before it's deleted, or None when that's turned off."""
+    setting = os.environ.get(DELETE_AFTER_ENV, "").strip()
+    if not setting:
+        return None
+    if not setting.isdigit() or int(setting) < 1:
+        logger.warning("%s=%r isn't a whole number of days (1 or more); deleting nothing", DELETE_AFTER_ENV, setting)
+        return None
+    return int(setting)
+
+
+def is_forgotten(row: SandboxRow, cutoff: int) -> bool:
+    """Checks whether a sandbox has stayed paused since before the cutoff time."""
+    return row.state == SandboxState.PAUSED and row.paused_at is not None and row.paused_at < cutoff
+
+
+def delete_forgotten_sandboxes() -> None:
+    """Deletes every sandbox paused for longer than the setting allows, with its bucket copies; off by default."""
+    days = delete_after_days()
+    if days is None:
+        return
+    cutoff = db.now() - days * SECONDS_PER_DAY
+    for row in db.list_live_sandboxes():
+        if is_forgotten(row, cutoff):
+            logger.warning("deleting %s: paused for more than %d days", row.id, days)
+            run_logging_failure(destroy, row.id)
+
+
+def run_cleanup_until_stopped(stop: threading.Event) -> None:
+    """Looks for forgotten sandboxes now and then once an hour, until the server shuts down."""
+    while not stop.is_set():
+        delete_forgotten_sandboxes()
+        stop.wait(CLEANUP_INTERVAL_SECONDS)
+
+
+# ---------------------------------------------------------------------------
+# Shutdown (6c): pause every running sandbox, so it survives the VM stopping.
+# Runs inside the server because the locks and running turns only exist here.
+# ---------------------------------------------------------------------------
+
+def pause_running_sandboxes() -> None:
+    """Saves every running sandbox to a snapshot, logging any that fail and carrying on with the rest."""
+    for row in db.list_live_sandboxes():
+        if row.state == SandboxState.RUNNING:
+            run_logging_failure(pause, row.id)
 
 
 # ---------------------------------------------------------------------------

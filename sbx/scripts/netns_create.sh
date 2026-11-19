@@ -41,3 +41,8 @@ sysctl -qw net.ipv4.ip_forward=1
 iptables -P FORWARD ACCEPT
 iptables -t nat -C POSTROUTING -s 10.201.0.0/16 -o $HOST_IFACE -j MASQUERADE 2>/dev/null \
   || iptables -t nat -A POSTROUTING -s 10.201.0.0/16 -o $HOST_IFACE -j MASQUERADE
+
+# 6. ...except Google's metadata server: it hands out the VM's service-account token, which can
+#    read and delete every snapshot in the bucket. First in FORWARD, so nothing above lets it through.
+iptables -C FORWARD -s 10.201.0.0/16 -d 169.254.169.254 -j DROP 2>/dev/null \
+  || iptables -I FORWARD 1 -s 10.201.0.0/16 -d 169.254.169.254 -j DROP

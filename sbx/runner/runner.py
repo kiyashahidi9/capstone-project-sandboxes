@@ -74,6 +74,18 @@ def locked_down() -> bool:
     return os.environ.get("AGENT_ISOLATION", "systemd").strip().lower() != "none"
 
 
+def agent_dir() -> str:
+    """Gives the folder the client's agent is installed in, or an empty string if none is set."""
+    return os.environ.get("AGENT_DIR", "").strip()
+
+
+def unlocked_working_dir() -> str | None:
+    """Gives the folder to start an agent in when it runs without lockdown (systemd-run handles the locked-down case)."""
+    if locked_down():
+        return None
+    return agent_dir() or None
+
+
 ## STARTING A TURN ##
 
 def run_turn(sandbox_id: str) -> None:
@@ -206,6 +218,8 @@ def systemd_command(unit: str, environment_file: str, agent_command: list[str]) 
         f"--uid={AGENT_USER}",
         f"--gid={AGENT_USER}",
     ]
+    if agent_dir():
+        command.append(f"--working-directory={agent_dir()}")
 
     properties = list(SYSTEMD_PROPERTIES)
     properties.append(f"RuntimeMaxSec={int(turn_timeout()) + 30}")
@@ -250,6 +264,7 @@ def run_agent(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=process_environment,
+                cwd=unlocked_working_dir(),
                 text=True,
                 encoding="utf-8",
                 errors="replace",

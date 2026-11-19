@@ -5,6 +5,7 @@ description = "Persistent Firecracker sandboxes for long-running coding agents"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.162.5",
+    "google-cloud-storage>=2.18",
     "httpx>=0.28.1",
     "openai>=3.49.0",
     "pydantic>=2.7",

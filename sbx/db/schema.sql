@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS sandboxes (
     updated_at    INTEGER NOT NULL,   -- unix seconds, changes with state
     turn_state    TEXT NOT NULL DEFAULT 'idle' CHECK (turn_state IN ('idle', 'working')),  -- is the agent running a turn right now
     snapshot_dir  TEXT,               -- host folder holding the snapshot; NULL unless paused
-    paused_at     INTEGER             -- unix seconds; NULL unless paused
+    paused_at     INTEGER,            -- unix seconds; NULL unless paused
+    upload_status TEXT CHECK (upload_status IN ('pending', 'uploading', 'done', 'failed', 'cancelled'))
+                                      -- copy of the latest snapshot to the bucket (uploads.py); NULL if never uploaded
 );
 
 -- The whole conversation of each sandbox, user messages included; owned by the API server, never edited.

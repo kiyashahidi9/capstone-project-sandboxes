@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 import locks
 import host_manager
+import uploads
 from api import db, helpers
 from api.main import app
 from api.models import SandboxState
@@ -183,6 +184,59 @@ def test_pause_records_the_snapshot_folder(client, host):
     client.post(f"/sandboxes/{ID}/pause")
 
     assert db.get_sandbox(ID).snapshot_dir == host_manager.snapshot_dir(ID)
+
+
+@pytest.fixture
+def upload_calls(host, monkeypatch):
+    """Records the uploader's start and stop in the host's call list, with whether the sandbox's lock was held."""
+    def record(name):
+        return lambda sandbox_id: host.calls.append((name, locks.lock_for(sandbox_id).locked()))
+
+    monkeypatch.setattr(uploads, "start_upload", record("start_upload"))
+    monkeypatch.setattr(uploads, "stop_upload", record("stop_upload"))
+    return host.calls
+
+
+def test_pause_starts_the_upload_after_the_snapshot_while_holding_the_lock(client, upload_calls):
+    make_sandbox(SandboxState.RUNNING)
+
+    client.post(f"/sandboxes/{ID}/pause")
+
+    assert upload_calls == ["stop_turn", "pause", ("start_upload", True)]
+
+
+def test_failed_pause_starts_no_upload(client, host, upload_calls):
+    make_sandbox(SandboxState.RUNNING)
+    host.pause_error = RuntimeError("snapshot failed")
+
+    client.post(f"/sandboxes/{ID}/pause")
+
+    assert not any(isinstance(call, tuple) and call[0] == "start_upload" for call in upload_calls)
+
+
+def test_resume_stops_the_upload_before_the_vm_starts(client, upload_calls):
+    make_sandbox(SandboxState.PAUSED)
+
+    client.post(f"/sandboxes/{ID}/resume")
+
+    assert upload_calls == [("stop_upload", True), "resume"]
+
+
+def test_message_to_a_paused_sandbox_stops_the_upload_before_resuming(client, upload_calls, monkeypatch):
+    make_sandbox(SandboxState.PAUSED)
+    monkeypatch.setattr(runner, "run_turn", lambda sandbox_id: None)
+
+    client.post(f"/sandboxes/{ID}/messages", json={"text": "carry on"})
+
+    assert upload_calls[:2] == [("stop_upload", True), "resume"]
+
+
+def test_delete_stops_the_upload_before_removing_the_files(client, upload_calls):
+    make_sandbox(SandboxState.PAUSED)
+
+    client.delete(f"/sandboxes/{ID}")
+
+    assert upload_calls[-2:] == [("stop_upload", True), "destroy"]
 
 
 @pytest.mark.parametrize("state, action", [
@@ -477,9 +531,120 @@ def test_server_start_runs_the_recovery(tmp_path, monkeypatch, host):
     make_sandbox(SandboxState.RESUMING)
 
     with TestClient(app):
-        pass
+        assert state_of() == SandboxState.RUNNING   # checked while up: stopping the server pauses it (6c)
 
+
+# ---------------------------------------------------------------------------
+# Shutdown (6c): every running sandbox is paused, so it survives the VM stopping
+# ---------------------------------------------------------------------------
+
+def test_shutdown_pauses_every_running_sandbox_and_leaves_the_rest(host):
+    """Checks running sandboxes get paused while paused and destroyed ones are left as they are."""
+    make_sandbox(SandboxState.RUNNING, ID)
+    make_sandbox(SandboxState.RUNNING, OTHER_ID)
+    already_paused = make_sandbox(SandboxState.PAUSED, "sbx_" + "c" * 32)
+
+    helpers.pause_running_sandboxes()
+
+    assert state_of(ID) == SandboxState.PAUSED
+    assert state_of(OTHER_ID) == SandboxState.PAUSED
+    assert state_of(already_paused) == SandboxState.PAUSED
+    assert host.calls.count("pause") == 2
+
+
+def test_one_failed_pause_at_shutdown_does_not_stop_the_others(host, monkeypatch):
+    """Checks a sandbox that can't be paused is logged and skipped, not left blocking the rest."""
+    make_sandbox(SandboxState.RUNNING, ID)
+    make_sandbox(SandboxState.RUNNING, OTHER_ID)
+
+    def pause_only_other(sandbox_id):
+        if sandbox_id == ID:
+            raise RuntimeError("disk full")
+        return {}
+
+    monkeypatch.setattr(host_manager, "pause_sandbox", pause_only_other)
+    host.alive = True   # the failed one's VM is still up, so it goes back to running
+
+    helpers.pause_running_sandboxes()
+
+    assert state_of(ID) == SandboxState.RUNNING
+    assert state_of(OTHER_ID) == SandboxState.PAUSED
+
+
+def test_stopping_the_server_pauses_running_sandboxes(tmp_path, monkeypatch, host):
+    """Checks the server's own shutdown does the pausing, where it has the locks and running turns."""
+    monkeypatch.setenv("SANDBOX_ADMIN_KEY", ADMIN_KEY)
+
+    with TestClient(app):
+        make_sandbox(SandboxState.RUNNING)
+
+    assert state_of() == SandboxState.PAUSED
+
+
+# ---------------------------------------------------------------------------
+# Restoring from the bucket on resume (7b)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("local_snapshot", [True, False])
+def test_resume_restores_from_the_bucket_only_when_the_local_snapshot_is_missing(client, host, monkeypatch,
+                                                                                local_snapshot):
+    """Checks the bucket is only used when the local copy is gone, and before the VM starts."""
+    def restore(sandbox_id):
+        host.calls.append("restore")
+        host.snapshot = True
+
+    monkeypatch.setattr(uploads, "restore_from_bucket", restore)
+    host.snapshot = local_snapshot
+    make_sandbox(SandboxState.PAUSED)
+
+    assert client.post(f"/sandboxes/{ID}/resume").status_code == 200
+
+    expected = ["resume"] if local_snapshot else ["restore", "resume"]
+    assert [call for call in host.calls if call in ("restore", "resume")] == expected
     assert state_of() == SandboxState.RUNNING
+
+
+def test_a_failed_restore_leaves_the_sandbox_paused(client, host, monkeypatch):
+    """Checks a download that fails puts the sandbox back to paused, so the resume can be tried again."""
+    def failing_restore(sandbox_id):
+        raise ConnectionError("bucket unreachable")
+
+    monkeypatch.setattr(uploads, "restore_from_bucket", failing_restore)
+    host.snapshot = False
+    host.healthy = False
+    make_sandbox(SandboxState.PAUSED)
+
+    assert client.post(f"/sandboxes/{ID}/resume").status_code == 500
+    assert state_of() == SandboxState.PAUSED
+    assert "resume" not in host.calls
+
+
+# ---------------------------------------------------------------------------
+# Deleting a sandbox also deletes its bucket copies (6b)
+# ---------------------------------------------------------------------------
+
+def test_deleting_a_sandbox_also_deletes_its_bucket_copies(client, host, monkeypatch):
+    """Checks a deleted sandbox stops costing bucket storage."""
+    deleted = []
+    monkeypatch.setattr(uploads, "delete_bucket_copies", deleted.append)
+    make_sandbox(SandboxState.PAUSED)
+
+    assert client.delete(f"/sandboxes/{ID}").status_code == 200
+
+    assert deleted == [ID]
+    assert state_of() == SandboxState.DESTROYED
+
+
+def test_an_unreachable_bucket_does_not_stop_a_delete(client, host, monkeypatch):
+    """Checks the sandbox is still deleted on the host when its bucket copies can't be."""
+    def unreachable(sandbox_id):
+        raise ConnectionError("bucket unreachable")
+
+    monkeypatch.setattr(uploads, "delete_bucket_copies", unreachable)
+    make_sandbox(SandboxState.PAUSED)
+
+    assert client.delete(f"/sandboxes/{ID}").status_code == 200
+    assert state_of() == SandboxState.DESTROYED
 
 
 @pytest.fixture(autouse=True)

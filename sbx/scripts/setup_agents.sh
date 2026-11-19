@@ -4,13 +4,19 @@
 # Run from sbx/, after setup_host.sh:   sudo scripts/setup_agents.sh
 # Safe to rerun. Rerun it after setup_host.sh (which hands .env back to you) and after changing the agent.
 #
+# Install a client's agent (a folder already on this host), never during a running turn:
+#   sudo AGENT_SRC=/path/to/my-bot AGENT_RUN="python -m mybot" scripts/setup_agents.sh
+#   AGENT_RUN is how to start it from inside its folder (default "python agent.py").
+#
 # Steps:
 #   1. User sbx-agent: the agent runs as it, never as root
 #   2. /opt/agents: the example agent and the guardrail check, owned by root, readable by sbx-agent
+#      (+ the client's folder in /opt/agents/<name>)
 #   3. /opt/agents/.venv on the system python3, with openai and the SDK
 #      (the repo's .venv uses uv's Python under /home, which the locked-down agent can't see)
+#      (+ rebuilt from scratch with the client's requirements.txt)
 #   4. /var/lib/sbx-turns: history and env files for each turn
-#   5. .env: root only
+#   5. .env: root only (+ AGENT_DIR and AGENT_CMD for the client's agent)
 #   6. Checklist
 set -Eeuo pipefail
 
@@ -22,9 +28,65 @@ AGENT_USER=sbx-agent
 AGENTS_DIR=/opt/agents
 TURNS_DIR=/var/lib/sbx-turns
 REAL_USER=${SUDO_USER:-$(id -un)}
+AGENT_SRC=${AGENT_SRC:-}                       # a client's agent folder; empty installs only the example
+AGENT_RUN=${AGENT_RUN:-python agent.py}        # how to start it, from inside its folder
+AGENT_NAME=${AGENT_SRC:+$(basename "$AGENT_SRC")}
+CLIENT_AGENT_DIR=$AGENTS_DIR/$AGENT_NAME
+VENV_PYTHON=$AGENTS_DIR/.venv/bin/python
 
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo "==> $*"; }
+
+# Stops before anything changes if the client's agent can't be installed as asked.
+check_client_agent() {
+  [[ -d $AGENT_SRC ]] || die "AGENT_SRC $AGENT_SRC is not a folder"
+  [[ $AGENT_NAME =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "agent folder name must be letters, digits, . _ or -: $AGENT_NAME"
+  [[ -f $ENV_FILE ]] || die "no .env yet: write it first (install.sh does this)"
+  check_agent_run
+}
+
+# Stops unless AGENT_RUN starts with python and every .py file it names is in the agent's folder.
+check_agent_run() {
+  local words word
+  read -ra words <<< "$AGENT_RUN"
+  [[ ${words[0]} =~ ^python3?$ ]] || die "AGENT_RUN must start with python or python3 (Python agents only for now)"
+  for word in "${words[@]:1}"; do
+    [[ $word != *.py || -f $AGENT_SRC/$word ]] || die "$word not found in $AGENT_SRC"
+  done
+}
+
+# Copies the client's agent folder in, readable but not changeable by the agent.
+install_client_agent() {
+  rm -rf "$CLIENT_AGENT_DIR"
+  cp -r "$AGENT_SRC" "$CLIENT_AGENT_DIR"
+  chown -R root:"$AGENT_USER" "$CLIENT_AGENT_DIR"
+  chmod -R u=rwX,g=rX,o= "$CLIENT_AGENT_DIR"
+}
+
+# Installs the libraries the client's agent lists in requirements.txt, if it has one.
+install_agent_requirements() {
+  local requirements=$CLIENT_AGENT_DIR/requirements.txt
+  [[ -f $requirements ]] || return 0
+  "$UV" pip install -q --python "$VENV_PYTHON" -r "$requirements"
+}
+
+# Gives AGENT_RUN with its leading python swapped for the agent venv's python.
+venv_command() {
+  local program rest
+  read -r program rest <<< "$AGENT_RUN"
+  echo "$VENV_PYTHON${rest:+ $rest}"
+}
+
+# Sets one NAME=value line in .env, replacing the old line or adding a new one.
+set_env_var() {
+  local name=$1 value=$2 updated
+  updated=$(awk -v name="$name" -v value="$value" '
+    index($0, name "=") == 1 { print name "=" value; found = 1; next }
+    { print }
+    END { if (!found) print name "=" value }
+  ' "$ENV_FILE")
+  printf '%s\n' "$updated" > "$ENV_FILE"
+}
 
 [[ $EUID -eq 0 ]] || die "run with sudo: sudo scripts/setup_agents.sh"
 command -v systemd-run >/dev/null || die "systemd-run not found; this needs a systemd host"
@@ -34,6 +96,7 @@ USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 UV=$(command -v uv || true)
 [[ -n $UV ]] || UV=$USER_HOME/.local/bin/uv
 [[ -x $UV ]] || die "uv not found; run setup_host.sh first"
+if [[ -n $AGENT_SRC ]]; then check_client_agent; fi
 
 ## 1. USER ##
 
@@ -49,14 +112,17 @@ install -o root -g "$AGENT_USER" -m 0640 \
   "$SBX_DIR/examples/agent/tools.py" \
   "$SBX_DIR/tests/guardrail_agent.py" \
   "$AGENTS_DIR/"
+if [[ -n $AGENT_SRC ]]; then install_client_agent; fi
 
 ## 3. AGENT VENV ##
 
 log "3. agent venv -> $AGENTS_DIR/.venv"
 export UV_PYTHON_DOWNLOADS=never   # the system python3, never one under a home folder
-[[ -x $AGENTS_DIR/.venv/bin/python ]] || "$UV" venv -q --python /usr/bin/python3 "$AGENTS_DIR/.venv"
+if [[ -n $AGENT_SRC ]]; then rm -rf "$AGENTS_DIR/.venv"; fi   # fresh, so an older agent's libraries don't linger
+[[ -x $VENV_PYTHON ]] || "$UV" venv -q --python /usr/bin/python3 "$AGENTS_DIR/.venv"
 # a normal (not editable) install copies the SDK into the venv
-"$UV" pip install -q --python "$AGENTS_DIR/.venv/bin/python" --reinstall-package persistent-sandboxes "$SBX_DIR"
+"$UV" pip install -q --python "$VENV_PYTHON" --reinstall-package persistent-sandboxes "$SBX_DIR"
+if [[ -n $AGENT_SRC ]]; then install_agent_requirements; fi
 chmod -R go-w,a+rX "$AGENTS_DIR/.venv"
 
 ## 4. TURN FILES ##
@@ -68,6 +134,10 @@ install -d -o root -g "$AGENT_USER" -m 0710 "$TURNS_DIR"
 ## 5. SECRETS ##
 
 log "5. $ENV_FILE root only"
+if [[ -n $AGENT_SRC ]]; then
+  set_env_var AGENT_DIR "$CLIENT_AGENT_DIR"
+  set_env_var AGENT_CMD "$(venv_command)"
+fi
 if [[ -f $ENV_FILE ]]; then
   chown root:root "$ENV_FILE"
   chmod 600 "$ENV_FILE"
@@ -87,15 +157,19 @@ check "$AGENT_USER can import openai and sdk"  sudo -u "$AGENT_USER" "$AGENTS_DI
 check ".env is root only (600)"                test "$(stat -c %a:%U "$ENV_FILE")" = 600:root
 check "$AGENT_USER can't read .env"            bash -c "! sudo -u $AGENT_USER cat '$ENV_FILE'"
 check "systemd-run starts $AGENT_USER"         bash -c "[[ \$(systemd-run --wait --pipe --quiet --collect --uid=$AGENT_USER -p ProtectHome=yes whoami) == $AGENT_USER ]]"
+if [[ -n $AGENT_SRC ]]; then
+  check "$AGENT_USER can read $CLIENT_AGENT_DIR" sudo -u "$AGENT_USER" ls "$CLIENT_AGENT_DIR"
+fi
 (( FAILS == 0 )) || die "$FAILS check(s) failed"
 
-# only ask for an edit if .env doesn't already point at the locked-down agent
-WANTED_CMD="$AGENTS_DIR/.venv/bin/python $AGENTS_DIR/agent.py"
+# only ask for an edit if .env doesn't already run an agent with the locked-down venv's python
+WANTED_CMD="$VENV_PYTHON $AGENTS_DIR/agent.py"
 CURRENT_CMD=$(grep -E '^AGENT_CMD=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
 
 echo
 echo "Agents locked down."
-if [[ $CURRENT_CMD != "$WANTED_CMD" ]]; then
+if [[ -n $AGENT_SRC ]]; then echo "Installed $AGENT_NAME: AGENT_CMD=$CURRENT_CMD"; fi
+if [[ $CURRENT_CMD != "$VENV_PYTHON "* ]]; then
   echo "Change AGENT_CMD in .env (sudo nano $ENV_FILE) to:"
   echo "  AGENT_CMD=$WANTED_CMD"
 fi

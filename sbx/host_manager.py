@@ -47,6 +47,7 @@ BASE_IMAGE_PATH = f"{FC_DIR}/rootfs.ext4"
 
 SANDBOXES_ROOT = os.environ.get("SBX_ROOT", "/var/sbx")
 CGROUP_ROOT = os.environ.get("SBX_CGROUP_ROOT", "/sys/fs/cgroup/sandboxes")
+NETNS_DIR = "/run/netns"   # where `ip netns` keeps namespaces; wiped by a reboot, like the cgroups
 
 MIN_SANDBOX_NUMBER = 1
 MAX_SANDBOX_NUMBER = 250          # 10.201.0.<N> must be a valid last octet
@@ -346,6 +347,17 @@ def ensure_cgroup_parent() -> None:
 def create_cgroup(sandbox_id: str) -> None:
     """Create the sandbox's own cgroup folder."""
     os.mkdir(cgroup_dir(sandbox_id))
+
+
+def ensure_network(n: int) -> None:
+    """Create slot n's network again if a host reboot wiped it; the slot itself survives in the database."""
+    if not os.path.exists(f"{NETNS_DIR}/{namespace_for(n)}"):
+        create_network(n)
+
+
+def ensure_cgroup(sandbox_id: str) -> None:
+    """Create the sandbox's cgroup folder, and its parent, again if a host reboot wiped them."""
+    os.makedirs(cgroup_dir(sandbox_id), exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -779,6 +791,8 @@ def resume_sandbox(sandbox_id: str) -> dict:
     require_stopped(sandbox_id)
     n = require_slot(sandbox_id)
     remove_socket(sandbox_id)
+    ensure_network(n)
+    ensure_cgroup(sandbox_id)
 
     try:
         started = time.monotonic()

@@ -35,6 +35,16 @@ class TurnState(StrEnum):
     WORKING = "working"
 
 
+class UploadStatus(StrEnum):
+    """How far the copy of a sandbox's latest snapshot to the bucket got; must match the CHECK in db/schema.sql."""
+
+    PENDING = "pending"
+    UPLOADING = "uploading"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"       # the sandbox resumed before the upload finished
+
+
 class EventType(StrEnum):
     """The kinds of event in a sandbox's conversation; listed in db/schema.sql."""
 
@@ -66,6 +76,7 @@ class SandboxRow(BaseModel):
     turn_state: TurnState = TurnState.IDLE
     snapshot_dir: str | None = None # host folder holding the snapshot; None unless paused
     paused_at: int | None = None    # unix seconds; None unless paused
+    upload_status: UploadStatus | None = None   # copy of the latest snapshot to the bucket; None if never uploaded
     n: int | None = None            # network slot; None when it holds none
 
 

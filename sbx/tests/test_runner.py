@@ -395,6 +395,32 @@ def test_the_systemd_command_locks_the_agent_down(monkeypatch):
     assert command[-2:] == ["python", "/opt/agents/agent.py"]
 
 
+def test_the_agent_runs_from_agent_dir(tmp_path, monkeypatch):
+    """Checks the agent starts inside its own folder, so relative paths and `python -m` work."""
+    home = tmp_path / "my-bot"
+    home.mkdir()
+    monkeypatch.setenv("AGENT_DIR", str(home))
+    use_agent(tmp_path, monkeypatch, "import os\nprint(os.getcwd())\n")
+    send()
+
+    runner.run_turn(SANDBOX_ID)
+
+    printed = [data["text"] for kind, data in events() if kind == EventType.AGENT_OUTPUT]
+    assert [os.path.realpath(path) for path in printed] == [os.path.realpath(home)]
+
+
+def test_the_systemd_command_starts_the_agent_in_agent_dir_when_set(monkeypatch):
+    """Checks the locked-down command names the agent's folder only when one is set."""
+    monkeypatch.setenv("AGENT_DIR", "/opt/agents/my-bot")
+    with_dir = runner.systemd_command("unit", "/env", ["python", "-m", "mybot"])
+
+    monkeypatch.delenv("AGENT_DIR")
+    without_dir = runner.systemd_command("unit", "/env", ["python", "-m", "mybot"])
+
+    assert "--working-directory=/opt/agents/my-bot" in with_dir
+    assert not any(part.startswith("--working-directory") for part in without_dir)
+
+
 def test_secrets_go_in_the_environment_file_not_the_command_line(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_ISOLATION", "none")
     path = runner.write_environment_file({"OPENAI_API_KEY": "sk-secret", "SANDBOX_TOKEN": "tok"})
