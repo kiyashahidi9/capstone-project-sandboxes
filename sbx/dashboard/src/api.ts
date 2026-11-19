@@ -33,8 +33,30 @@ export type TurnSummary = {
   started_at: number;
   ended_at: number | null;
   seconds_since_last_event: number;
+  last_seq: number;
   last_action: SandboxEvent | null;
   unfinished_step: SandboxEvent | null;
+};
+
+// same fields as the API's ReplayTool and ReplayStep (docs/observability.md, "Replay")
+export type ReplayTool = {
+  tool_call_id: string;
+  name: string | null;
+  arguments: unknown;
+  result: unknown;          // exactly what the model was given; null if it never finished
+  finished: boolean;
+};
+
+export type ReplayStep = {
+  step: number;
+  seq: number;
+  at: number;
+  model: string | null;
+  messages: Record<string, unknown>[];  // what the model was sent, system prompt first
+  new_messages: number;                 // how many are new since the previous step
+  matches_record: boolean | null;
+  response: Record<string, unknown> | null;
+  tools: ReplayTool[];
 };
 
 
@@ -75,6 +97,11 @@ export async function listSandboxes(includeDestroyed = false): Promise<Sandbox[]
 export async function listTurns(id: string): Promise<TurnSummary[]> {
   const body = await request<{ turns: TurnSummary[] }>(`/sandboxes/${id}/turns`);
   return body.turns;
+}
+
+export async function getReplay(id: string, turn: number): Promise<ReplayStep[]> {
+  const body = await request<{ steps: ReplayStep[] }>(`/sandboxes/${id}/replay?turn=${turn}`);
+  return body.steps;
 }
 
 // one turn's events with seq greater than after

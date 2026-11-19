@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { listEvents, listTurns, type SandboxEvent, type TurnSummary } from "./api";
+import Replay from "./Replay";
 
 const POLL_INTERVAL_MS = 2000;
 const SUMMARY_CHARS = 140;
@@ -117,6 +118,7 @@ export default function SandboxDetail({ sandboxId, onBack }: { sandboxId: string
   const [events, setEvents] = useState<SandboxEvent[]>([]);
   const [openSeq, setOpenSeq] = useState<number | null>(null);         // the event whose full data is shown
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<"timeline" | "replay">("timeline");
 
   const shownTurn = chosenTurn ?? (turns && turns.length > 0 ? turns[turns.length - 1].turn : null);
   const turn = turns?.find((t) => t.turn === shownTurn);
@@ -210,8 +212,21 @@ export default function SandboxDetail({ sandboxId, onBack }: { sandboxId: string
 
           {turn && (
             <>
-              <h3>Turn {turn.turn} timeline</h3>
+              <header>
+                <h3>Turn {turn.turn}</h3>
+                <div className="steps">
+                  <button className={view === "timeline" ? "toggle on" : "toggle"} onClick={() => setView("timeline")}>
+                    Timeline
+                  </button>
+                  <button className={view === "replay" ? "toggle on" : "toggle"} onClick={() => setView("replay")}>
+                    Replay
+                  </button>
+                </div>
+              </header>
               <FailureSummary turn={turn} />
+              {view === "replay" ? (
+                <Replay sandboxId={sandboxId} turn={turn.turn} lastSeq={turn.last_seq} />
+              ) : (
               <table className="timeline">
                 <tbody>
                   {events.map((event) => (
@@ -226,6 +241,7 @@ export default function SandboxDetail({ sandboxId, onBack }: { sandboxId: string
                   ))}
                 </tbody>
               </table>
+              )}
             </>
           )}
         </>

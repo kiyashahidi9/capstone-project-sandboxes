@@ -119,8 +119,10 @@ def database(tmp_path, monkeypatch):
 
 
 def use_agent(tmp_path, monkeypatch, source: str, timeout: float = WAIT) -> None:
-    """Writes a fake agent to a file and makes it the AGENT_CMD."""
-    script = tmp_path / "agent.py"
+    """Writes a fake agent to its own folder (like /opt/agents) and makes it the AGENT_CMD."""
+    folder = tmp_path / "agents"
+    folder.mkdir(exist_ok=True)
+    script = folder / "agent.py"
     script.write_text(source)
     monkeypatch.setenv("AGENT_CMD", shlex.join([sys.executable, str(script)]))
     monkeypatch.setenv("AGENT_TURN_TIMEOUT", str(timeout))
@@ -154,7 +156,7 @@ def test_two_lines_then_exit_zero_finishes_the_turn(tmp_path, monkeypatch):
 
     assert events() == [
         (EventType.USER_MESSAGE, {"text": "do the thing"}),
-        (EventType.TURN_STARTED, {}),
+        (EventType.TURN_STARTED, runner.agent_version(os.environ["AGENT_CMD"])),
         (EventType.AGENT_OUTPUT, {"text": "one"}),
         (EventType.AGENT_OUTPUT, {"text": "two"}),
         (EventType.TURN_FINISHED, {"exit_code": 0}),
@@ -228,7 +230,7 @@ def test_a_step_line_is_stored_as_its_own_event(tmp_path, monkeypatch):
 
     assert events() == [
         (EventType.USER_MESSAGE, {"text": "do the thing"}),
-        (EventType.TURN_STARTED, {}),
+        (EventType.TURN_STARTED, runner.agent_version(os.environ["AGENT_CMD"])),
         (EventType.LLM_REQUEST, {
             "model": "gpt-4.1",
             "system": "You are a coding agent.",
@@ -461,3 +463,31 @@ def test_lockdown_is_on_unless_turned_off(monkeypatch):
 
     monkeypatch.setenv("AGENT_ISOLATION", "none")
     assert not runner.locked_down()
+
+
+## WHICH AGENT RAN ##
+
+def test_turn_started_names_the_agent_and_hashes_its_folder(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, TWO_LINES)
+    send()
+
+    runner.run_turn(SANDBOX_ID)
+
+    started = next(data for kind, data in events() if kind == EventType.TURN_STARTED)
+    assert started["agent_cmd"] == os.environ["AGENT_CMD"]
+    assert len(started["agent_hash"]) == 12
+
+
+def test_the_agent_hash_changes_when_any_agent_file_changes(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, TWO_LINES)
+    before = runner.agent_version(os.environ["AGENT_CMD"])["agent_hash"]
+
+    (tmp_path / "agents" / "tools.py").write_text("# a helper next to the agent")
+    after = runner.agent_version(os.environ["AGENT_CMD"])["agent_hash"]
+
+    assert before != after
+
+
+def test_agent_version_without_a_file_keeps_just_the_command():
+    assert runner.agent_version("") == {}
+    assert runner.agent_version("no-such-program --flag") == {"agent_cmd": "no-such-program --flag"}

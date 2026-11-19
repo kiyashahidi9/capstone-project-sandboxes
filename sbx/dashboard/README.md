@@ -14,6 +14,7 @@ npm run dev      # http://localhost:5173
 | `src/api.ts`     | Calls the sandbox endpoints (list, pause, resume, delete) and `GET .../turns`, `GET .../events` |
 | `src/App.tsx`    | Table, action buttons, delete confirmation modal, loading and error states |
 | `src/SandboxDetail.tsx` | Click a sandbox ID: its turns, the failure summary, and the turn's timeline |
+| `src/Replay.tsx` | The turn's **Replay** tab: what the model was sent at each step, its reply, and its tools' results |
 | `src/index.css`  | Styles                                                               |
 | `vite.config.ts` | Forwards `/api/*` to `SANDBOX_API` and adds the admin key            |
 

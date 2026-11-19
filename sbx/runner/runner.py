@@ -7,6 +7,7 @@ turns every line it prints into an event, and knows when the turn starts and end
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 import os
 import secrets
@@ -105,14 +106,14 @@ def run_turn(sandbox_id: str) -> None:
 
 def run_locked_turn(sandbox_id: str, turn: Turn) -> None:
     """Does the turn's work; run_turn holds the sandbox's lock and cleans up afterwards."""
-    db.append_event(sandbox_id, EventType.TURN_STARTED, {})
+    command = os.environ.get("AGENT_CMD", "").strip()
+    db.append_event(sandbox_id, EventType.TURN_STARTED, agent_version(command))
 
     row = db.get_sandbox(sandbox_id)
     if turn.stopped or row is None or row.state != SandboxState.RUNNING:
         db.append_event(sandbox_id, EventType.TURN_FAILED, {"reason": "paused"})
         return
 
-    command = os.environ.get("AGENT_CMD", "").strip()
     if not command:
         db.append_event(sandbox_id, EventType.TURN_FAILED, {"reason": "AGENT_CMD is not set"})
         return
@@ -129,6 +130,47 @@ def run_locked_turn(sandbox_id: str, turn: Turn) -> None:
     finally:
         auth.drop_turn_token(token)
         os.remove(history_path)
+
+
+## WHICH AGENT RAN ##
+
+def agent_version(command: str) -> dict:
+    """
+    Which agent ran a turn, for turn_started (docs/observability.md)
+    its command, and a short hash of the files in its folder, so a changed agent shows up in the history
+    the folder is the one holding the script the command names (e.g. /opt/agents for /opt/agents/agent.py)
+    """
+    if not command:
+        return {}
+
+    version: dict = {"agent_cmd": command}
+    arguments = shlex.split(command)
+
+    # prefer a script after the program (python agent.py), else the program itself (./agent)
+    files = [argument for argument in arguments[1:] if os.path.isfile(argument)]
+    if not files and os.path.isfile(arguments[0]):
+        files = [arguments[0]]
+
+    if files:
+        try:
+            version["agent_hash"] = folder_hash(os.path.dirname(os.path.abspath(files[-1])))
+        except OSError:
+            pass
+    return version
+
+
+def folder_hash(folder: str) -> str:
+    """The first 12 hex digits of a SHA-256 over every file's name and contents in the folder (not subfolders)."""
+    digest = hashlib.sha256()
+
+    for name in sorted(os.listdir(folder)):
+        path = os.path.join(folder, name)
+        if not os.path.isfile(path):
+            continue
+        with open(path, "rb") as file:
+            digest.update(name.encode() + b"\0" + hashlib.sha256(file.read()).digest())
+
+    return digest.hexdigest()[:12]
 
 
 ## FILES FOR THE AGENT ##

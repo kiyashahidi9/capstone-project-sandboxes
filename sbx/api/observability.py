@@ -9,7 +9,8 @@ reads stored events only: nothing here records anything
 
 from __future__ import annotations
 
-from api.models import Event, EventType, FailureCause, TurnStatus, TurnSummary
+from api.models import Event, EventType, FailureCause, ReplayStep, ReplayTool, TurnStatus, TurnSummary
+from sdk.history import chat_from_events
 
 
 ## CONFIG ##
@@ -161,3 +162,80 @@ def unfinished_step(events: list[Event]) -> Event | None:
     if not unanswered:
         return None
     return max(unanswered, key=lambda event: event.seq)
+
+
+## REPLAY ##
+
+def replay_turn(events: list[Event], turn: int) -> list[ReplayStep] | None:
+    """
+    Every model call in a turn: what the model was sent, what it answered, and what its tools returned
+    rebuilt from events with sdk/history.py, the same code the example agent builds its chat with
+    calls nothing; None if there is no such turn
+    """
+    turn_events = events_in_turn(events, turn)
+    if turn_events is None:
+        return None
+
+    all_events = [event.model_dump() for event in events]
+    history_length = len(chat_from_events([event for event in all_events if event["seq"] < turn_events[0].seq]))
+    requests = [event for event in turn_events if event.type == EventType.LLM_REQUEST]
+
+    steps: list[ReplayStep] = []
+    shown_before = None     # how many messages the previous step had
+
+    for number, request in enumerate(requests, start=1):
+        next_seq = requests[number].seq if number < len(requests) else None
+        after_request = [
+            event for event in turn_events
+            if event.seq > request.seq and (next_seq is None or event.seq < next_seq)
+        ]
+
+        # what the model was sent: the agent's system prompt, then the chat rebuilt from every earlier event
+        rebuilt = chat_from_events([event for event in all_events if event["seq"] < request.seq])
+        system = request.data.get("system")
+        messages = ([{"role": "system", "content": system}] if system is not None else []) + rebuilt
+
+        recorded = request.data.get("messages")
+        response = next((event for event in after_request if event.type == EventType.LLM_RESPONSE), None)
+
+        if shown_before is None:
+            new_messages = len(rebuilt) - history_length
+        else:
+            new_messages = len(messages) - shown_before
+        shown_before = len(messages)
+
+        steps.append(ReplayStep(
+            step=number,
+            seq=request.seq,
+            at=request.at,
+            model=request.data.get("model"),
+            messages=messages,
+            new_messages=new_messages,
+            matches_record=None if recorded is None else recorded == rebuilt,
+            response=response.data if response is not None else None,
+            tools=replay_tools(response, after_request),
+        ))
+
+    return steps
+
+
+def replay_tools(response: Event | None, after_request: list[Event]) -> list[ReplayTool]:
+    """The tool calls one model reply asked for, each with its result if it finished."""
+    calls = (response.data.get("tool_calls") or []) if response is not None else []
+    results = {
+        str(event.data.get("tool_call_id", "")): event.data.get("result")
+        for event in after_request
+        if event.type == EventType.TOOL_COMPLETED
+    }
+
+    tools: list[ReplayTool] = []
+    for call in calls:
+        call_id = str(call.get("tool_call_id", ""))
+        tools.append(ReplayTool(
+            tool_call_id=call_id,
+            name=call.get("name"),
+            arguments=call.get("arguments"),
+            result=results.get(call_id),
+            finished=call_id in results,
+        ))
+    return tools

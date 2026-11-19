@@ -44,6 +44,7 @@ from api.models import (
     MessageResponse,
     SandboxInfo,
     SandboxListResponse,
+    ReplayResponse,
     SandboxState,
     TurnListResponse,
     TurnState,
@@ -235,3 +236,16 @@ def list_turns(sandbox_id: str) -> TurnListResponse:
     working = row.turn_state == TurnState.WORKING
     turns = observability.summarize_turns(db.list_events(sandbox_id), working, db.now())
     return TurnListResponse(turns=turns)
+
+
+@app.get("/sandboxes/{sandbox_id}/replay", response_model=ReplayResponse, dependencies=[ADMIN_ONLY])
+def replay_turn(sandbox_id: str, turn: int = Query(ge=1)) -> ReplayResponse:
+    """
+    Replays one turn for debugging: what the model was sent at each step, its answer, and its tools' results
+    calls nothing; 404 if there is no such turn
+    """
+    require_sandbox(sandbox_id)
+    steps = observability.replay_turn(db.list_events(sandbox_id), turn)
+    if steps is None:
+        raise HTTPException(status_code=HTTP_NOT_FOUND, detail="Turn not found")
+    return ReplayResponse(turn=turn, steps=steps)

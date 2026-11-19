@@ -152,3 +152,34 @@ pre {
   background: #fff8f8;
 }
 .failure div { margin-top: 4px; font-size: 13px; }
+
+/* ## REPLAY ## */
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+button.toggle.on {
+  background: #0969da;
+  border-color: #0969da;
+  color: white;
+}
+
+details.message {
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: white;
+  font-size: 13px;
+}
+details.message summary { cursor: pointer; }
+
+.tool {
+  margin-bottom: 8px;
+  padding: 8px;
+  border-left: 3px solid #0969da;
+}

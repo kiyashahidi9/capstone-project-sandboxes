@@ -1,6 +1,6 @@
 # Observability
 
-See what an agent did in a sandbox, and why a turn failed, even after the agent or the VM is gone.
+See what an agent did in a sandbox, why a turn failed, and exactly what the model was sent at each step, even after the agent or the VM is gone.
 
 ## How it works
 
@@ -8,11 +8,13 @@ Nothing new is stored. Everything is read from the existing `events` table in `s
 
 | Piece | Where | Does |
 |-------|-------|------|
-| Step events | Agent → runner | The agent prints `llm_request`, `llm_response`, `tool_started` and `tool_completed` lines ([agent contract](agent_contract.md)). The example agent now does this |
+| Step events | Agent → runner | The agent prints `llm_request`, `llm_response`, `tool_started` and `tool_completed` lines ([agent contract](agent_contract.md)). The example agent does this |
+| Shared history | `sdk/history.py` | Rebuilds the chat from events. The example agent builds its context with it, and so does replay |
+| Agent version | `runner/runner.py` | `turn_started` gets `agent_cmd` and `agent_hash` |
 | Failure cause | `runner/runner.py` | A failed turn's `turn_failed` gets a `cause` |
-| Turn summaries | `api/observability.py` | Groups events into turns and sums each one up |
+| Turns and replay | `api/observability.py` | Groups events into turns, sums each one up, and replays its model calls |
 | Endpoints | `api/main.py` | Read-only; also work for destroyed sandboxes |
-| Timeline page | `dashboard/src/SandboxDetail.tsx` | Click a sandbox ID in the dashboard |
+| Pages | `dashboard/src/SandboxDetail.tsx`, `Replay.tsx` | Click a sandbox ID, pick a turn, then **Timeline** or **Replay** |
 
 ## Endpoints
 
@@ -20,6 +22,15 @@ Nothing new is stored. Everything is read from the existing `events` table in `s
 |--------|----------|---------|
 | GET | `/sandboxes/{id}/turns` | One summary per turn: `status`, `reason`, `cause`, `exit_code`, `stderr_tail`, `last_action`, `unfinished_step`, `seconds_since_last_event` |
 | GET | `/sandboxes/{id}/events?turn=N&after=S` | One turn's events, oldest first. 404 if there is no turn `N` |
+| GET | `/sandboxes/{id}/replay?turn=N` | One step per model call: the `messages` sent (system prompt first), the `response`, each tool's `result`, and `matches_record`. 404 if there is no turn `N` |
+
+## Replay
+
+Replay rebuilds what the model was sent at each step, from events alone. It never calls the model or runs a tool.
+
+- **One version of history:** the agent builds its chat with `chat_from_events` and adds every reply and result in their recorded form. Replay rebuilds with the same function, so it shows exactly what the model got, across turns too.
+- **`matches_record`:** compares the rebuild with the messages the agent recorded in `llm_request`. `false` means the record was cut (64,000 characters) or the agent doesn't use `sdk/history.py`. `null` means the agent recorded no messages.
+- **Turns without steps:** an agent that doesn't print steps has its `agent_output` lines used as its replies in later turns, and its own turns have no replay steps.
 
 ## Choices
 
@@ -32,8 +43,11 @@ Nothing new is stored. Everything is read from the existing `events` table in `s
 | Other causes | `paused` (a user or auto-pause), `host` (server restart, missing `AGENT_CMD`, runner error), `unknown` (the VM check failed) | Worked out from `reason` when no cause is stored |
 | Unresponsive | A turn that's still working with no event for 5 minutes (`UNRESPONSIVE_AFTER`) | It's a warning. The 30-minute timeout still does the killing |
 | Unfinished step | The newest `tool_started` with no `tool_completed`, or `llm_request` with no `llm_response` | Shows what the agent was doing when it died |
-| Big payloads | Any string over 64,000 characters is cut, with `[truncated N characters]` added | Keeps one huge output from bloating `state.db`. Replay sees the cut text |
-| Replay | Event shapes unchanged; `cause` is only added to `turn_failed` | Replay already reads these events and stops at `turn_failed` |
+| Big payloads | Any string over 64,000 characters is cut, with `[truncated N characters]` added | Keeps one huge output from bloating `state.db`. Replay sees the cut text, and `matches_record` turns `false` |
+| Message format | OpenAI's chat format | It's what the model gets, so replay can show it as is |
+| Tool `result` | Exactly what the model was given (a write gives `"ok"`) | Replay must rebuild the model's input, not a richer record. The written content is still in `tool_started` |
+| A call left unanswered | Gets `error: the turn ended before this tool finished` in later turns | OpenAI refuses a chat with an unanswered tool call |
+| Agent version | `agent_cmd` plus a 12-digit hash of the files in the agent's folder (e.g. `/opt/agents`) | Shows when a different agent ran. The SDK in the agent's venv isn't part of the hash |
 
 ## Turn statuses
 
@@ -48,4 +62,6 @@ Nothing new is stored. Everything is read from the existing `events` table in `s
 
 ## Tests
 
-`uv run pytest tests/test_observability.py tests/test_runner.py`
+`uv run pytest tests/test_observability.py tests/test_replay.py tests/test_agent_state.py tests/test_runner.py`
+
+`test_replay.py` runs the real example agent through the runner with a fake model that logs what it receives, and checks replay rebuilds exactly that at every step.

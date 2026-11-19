@@ -14,6 +14,7 @@ import sys
 
 from openai import OpenAI
 
+from sdk.history import assistant_message, chat_from_events, tool_message
 from sdk.sandbox import Sandbox
 from tools import build_tools   # examples/agent/tools.py, next to this file
 
@@ -54,41 +55,11 @@ def load_history(path: str | None) -> list[dict]:
     return json.loads(text)
 
 
-def history_to_messages(events: list[dict]) -> list[dict]:
-    """
-    Turns earlier events back into a chat for the model
-    user_message -> a user turn
-    agent_output and question lines -> joined into one assistant turn
-    """
-    messages: list[dict] = []
-
-    for event in events:
-        text = event["data"].get("text", "")
-
-        if event["type"] == "user_message":
-            messages.append({"role": "user", "content": text})
-
-        elif event["type"] in ("agent_output", "question"):
-            if messages and messages[-1]["role"] == "assistant":
-                messages[-1]["content"] += "\n" + text
-            else:
-                messages.append({"role": "assistant", "content": text})
-
-    return messages
-
-
 ## STEPS (docs/agent_contract.md, read by docs/observability.md) ##
 
 def step(kind: str, **data) -> None:
     """Prints one step as a JSON line; the runner stores it as its own event, and the chat doesn't show it."""
     print(json.dumps({"type": kind, **data}, default=str))
-
-
-def as_dict(message) -> dict:
-    """A chat message as plain data: ours are dicts already, the model's replies are objects."""
-    if isinstance(message, dict):
-        return message
-    return message.model_dump(exclude_none=True)
 
 
 def parse_arguments(text: str):
@@ -101,11 +72,11 @@ def parse_arguments(text: str):
 
 ## TOOL RUNNER ##
 
-def run_tool(sandbox: Sandbox, name: str, args: dict) -> tuple[str, object]:
+def run_tool(sandbox: Sandbox, name: str, args: dict) -> object:
     """
     Runs one tool call from the model in the sandbox
     prints what it's doing
-    returns the result as text for the model, and the result to record in tool_completed
+    returns exactly what the model is given (recorded in tool_completed): text as is, anything else as JSON
     """
     if name == "run_command":
         background = args.get("background", False)
@@ -117,18 +88,17 @@ def run_tool(sandbox: Sandbox, name: str, args: dict) -> tuple[str, object]:
         for line in output.splitlines()[:5]:
             print(f"      {line}")
 
-        return json.dumps(result), result
+        return result
 
     path = absolute_path(args["path"])
 
     if name == "read_file":
         print(f"[read] {path}")
-        content = sandbox.read_file(path)
-        return content, content
+        return sandbox.read_file(path)
 
     print(f"[write] {path}")
     sandbox.write_file(path, args["content"])
-    return "ok", {"path": path, "content": args["content"]}
+    return "ok"
 
 
 def absolute_path(path: str) -> str:
@@ -154,51 +124,47 @@ def main() -> int:
     sandbox = Sandbox.from_env()
     client = OpenAI()
 
+    # the same rebuild replay uses, so the record matches what the model was really sent
     history = load_history(os.environ.get("SANDBOX_HISTORY"))
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages += history_to_messages(history)
+    messages += chat_from_events(history)
     messages.append({"role": "user", "content": task})
 
     for _ in range(MAX_STEPS):
         # record the request before sending it, so a hang or crash in the call shows as unfinished
-        step("llm_request", model=MODEL, system=SYSTEM_PROMPT, tools=TOOLS, messages=[as_dict(m) for m in messages[1:]])
+        step("llm_request", model=MODEL, system=SYSTEM_PROMPT, tools=TOOLS, messages=messages[1:])
         response = client.chat.completions.create(
             model=MODEL,
             messages=messages,
             tools=TOOLS,
         )
         message = response.choices[0].message
-        messages.append(message)
+
+        # record the reply, then add the recorded version to the chat, so the two can't differ
+        reply: dict = {}
+        if message.content or not message.tool_calls:
+            reply["text"] = message.content or ""
+        if message.tool_calls:
+            reply["tool_calls"] = [
+                {"tool_call_id": call.id, "name": call.function.name, "arguments": parse_arguments(call.function.arguments)}
+                for call in message.tool_calls
+            ]
+        step("llm_response", **reply)
+        messages.append(assistant_message(reply))
 
         if not message.tool_calls:
-            step("llm_response", text=message.content or "")
             print(message.content or "")    # plain text too, so the chat shows the answer
             return EXIT_FINISHED
 
-        calls = [
-            {"tool_call_id": call.id, "name": call.function.name, "arguments": parse_arguments(call.function.arguments)}
-            for call in message.tool_calls
-        ]
-        if message.content:
-            step("llm_response", text=message.content, tool_calls=calls)
-        else:
-            step("llm_response", tool_calls=calls)
-
-        for call, recorded in zip(message.tool_calls, calls):
+        for call, recorded in zip(message.tool_calls, reply["tool_calls"]):
             step("tool_started", **recorded)
             try:
                 args = json.loads(call.function.arguments)
-                output, result = run_tool(sandbox, call.function.name, args)
+                result = run_tool(sandbox, call.function.name, args)
             except Exception as e:
-                output = f"error: {e}"
-                result = output
+                result = f"error: {e}"
             step("tool_completed", tool_call_id=call.id, result=result)
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": output,
-            })
+            messages.append(tool_message(call.id, result))
 
     print(f"stopped after {MAX_STEPS} steps without finishing")
     return EXIT_FAILED

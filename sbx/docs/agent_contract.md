@@ -34,7 +34,7 @@ How to hand us your agent. Your agent is a **command**. We run it once for each 
 ]
 ```
 
-To rebuild the conversation, use the `user_message` events (what the user said) and the `agent_output` and `question` events (what you said).
+To rebuild the conversation, use `chat_from_events(history)` from `sdk/history.py`. It gives OpenAI chat messages from `user_message`, `llm_response`, `tool_completed` and `question`, or from `agent_output` for turns with no steps. Replay uses the same function, so building your chat with it (and adding each reply with `assistant_message` and each result with `tool_message`) makes replay show exactly what your model was sent.
 
 ## Output
 
@@ -56,9 +56,9 @@ Order for one model round:
 {"type": "tool_completed", "tool_call_id": "call_1", "result": {"exit_code": 0, "stdout": "hi\n", "stderr": ""}}
 ```
 
-A text answer is `{"type": "llm_response", "text": "..."}`. A write stores `{"path": "...", "content": "..."}` as its `result`. `llm_request` carries the model, the system prompt, the tool schemas, and the messages. It does not carry an API key.
+A text answer is `{"type": "llm_response", "text": "..."}`. A `result` is exactly what the model was given: text as is, anything else as data that is sent as JSON (a write gives `"ok"`). `llm_request` carries the model, the system prompt, the tool schemas, and the messages without the system prompt. It does not carry an API key.
 
-Playback walks these rows in order and rebuilds the chat from `user_message`, `llm_response`, and `tool_completed`. It uses the stored return. It does not call the model again, and it does not run the tool again. Plain text stays `agent_output`.
+Replay walks these rows in order and rebuilds the chat from `user_message`, `llm_response`, and `tool_completed` (see [observability.md](observability.md)). It uses the stored return. It does not call the model again, and it does not run the tool again. Plain text stays `agent_output`.
 
 ## Example
 
