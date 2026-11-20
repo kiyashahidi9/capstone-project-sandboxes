@@ -34,6 +34,7 @@ export type TurnSummary = {
   started_at: number;
   ended_at: number | null;
   seconds_since_last_event: number;
+  first_seq: number;        // the turn's events are first_seq..last_seq
   last_seq: number;
   last_action: SandboxEvent | null;
   unfinished_step: SandboxEvent | null;

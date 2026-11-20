@@ -217,12 +217,12 @@ def list_events(
     """
     require_sandbox(sandbox_id)
     if turn is None:
-        return EventListResponse(events=db.list_events(sandbox_id, after))
+        return EventListResponse(events=[observability.for_clients(event) for event in db.list_events(sandbox_id, after)])
 
     events = observability.events_in_turn(db.list_events(sandbox_id), turn)
     if events is None:
         raise HTTPException(status_code=HTTP_NOT_FOUND, detail="Turn not found")
-    return EventListResponse(events=[event for event in events if event.seq > after])
+    return EventListResponse(events=[observability.for_clients(event) for event in events if event.seq > after])
 
 
 # ---------------------------------------------------------------------------

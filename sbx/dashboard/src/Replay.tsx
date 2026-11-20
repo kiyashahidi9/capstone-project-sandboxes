@@ -9,8 +9,8 @@ type Message = Record<string, unknown>;
 type ToolCall = { id: string; name: string; arguments: unknown; result: unknown; finished: boolean };
 
 // one turn of the chat: the user's message and everything the assistant did after it
-type ChatGroup = { user: Message | null; items: ChatItem[]; isNew: boolean };
-type ChatItem = { kind: "text"; text: string; isNew: boolean } | { kind: "tool"; call: ToolCall; isNew: boolean };
+type ChatGroup = { user: Message | null; items: ChatItem[] };
+type ChatItem = { kind: "text"; text: string } | { kind: "tool"; call: ToolCall };
 
 
 // ## FORMATTING ##
@@ -56,29 +56,26 @@ function describeResult(result: unknown): string {
 // ## MESSAGES INTO A CHAT ##
 
 // groups the messages sent to the model by turn, pairing each tool call with its result
-function toChat(messages: Message[], firstNew: number): { system: Message | null; groups: ChatGroup[] } {
+function toChat(messages: Message[]): { system: Message | null; groups: ChatGroup[] } {
   let system: Message | null = null;
   const groups: ChatGroup[] = [];
   const callsById = new Map<string, ToolCall>();
 
-  messages.forEach((message, index) => {
-    const isNew = index >= firstNew;
-
+  messages.forEach((message) => {
     if (message.role === "system") {
       system = message;
       return;
     }
     if (message.role === "user" || groups.length === 0) {
-      groups.push({ user: message.role === "user" ? message : null, items: [], isNew });
+      groups.push({ user: message.role === "user" ? message : null, items: [] });
       if (message.role === "user") return;
     }
 
     const group = groups[groups.length - 1];
-    group.isNew ||= isNew;
 
     if (message.role === "assistant") {
       if (typeof message.content === "string" && message.content.trim() !== "") {
-        group.items.push({ kind: "text", text: message.content, isNew });
+        group.items.push({ kind: "text", text: message.content });
       }
       const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
       for (const raw of calls) {
@@ -91,7 +88,7 @@ function toChat(messages: Message[], firstNew: number): { system: Message | null
           finished: false,
         };
         callsById.set(call.id, call);
-        group.items.push({ kind: "tool", call, isNew });
+        group.items.push({ kind: "tool", call });
       }
     } else if (message.role === "tool") {
       // the result belongs on its call's card
@@ -109,33 +106,55 @@ function toChat(messages: Message[], firstNew: number): { system: Message | null
 
 // ## PIECES ##
 
-function ToolCard({ call, isNew }: { call: ToolCall; isNew: boolean }) {
-  const failed = typeof call.result === "string" && call.result.startsWith("error:");
+// a result counts as failed when it's an error message or a command that exited non-zero
+function resultFailed(result: unknown): boolean {
+  const value = parsed(result);
+  if (typeof value === "string") return value.startsWith("error:");
+  if (value && typeof value === "object" && "exit_code" in value) {
+    return (value as { exit_code: unknown }).exit_code !== 0;
+  }
+  return false;
+}
+
+// one tool call: "call" shows what was asked (name and arguments), "result" what came back, "both" both
+function ToolCard({ call, show = "both" }: { call: ToolCall; show?: "call" | "result" | "both" }) {
+  const failed = resultFailed(call.result);
 
   return (
-    <div className={isNew ? "tool-card new" : "tool-card"}>
+    <div className="tool-card">
       <div>
-        <code>{call.name}</code> {describeArguments(call.arguments)}
+        <code className="tool-name">{call.name}</code> {describeArguments(call.arguments)}
       </div>
-      {call.finished ? (
+
+      {/* what was asked comes before what came back */}
+      {show !== "result" && (
         <details>
-          <summary className={failed ? "result failed" : "result"}>returned: {describeResult(call.result)}</summary>
-          <pre>{pretty(parsed(call.result))}</pre>
+          <summary className="muted">arguments</summary>
+          <div className="teal-box">
+            <pre>{pretty(parsed(call.arguments))}</pre>
+          </div>
         </details>
-      ) : (
-        <div className="result failed">never finished</div>
       )}
-      <details>
-        <summary className="muted">arguments</summary>
-        <pre>{pretty(parsed(call.arguments))}</pre>
-      </details>
+
+      {show !== "call" &&
+        (call.finished ? (
+          <details>
+            <summary className={failed ? "result failed" : "result"}>returned: {describeResult(call.result)}</summary>
+            <div className="teal-box">
+              <pre>{pretty(parsed(call.result))}</pre>
+            </div>
+          </details>
+        ) : (
+          <div className="result failed">never finished</div>
+        ))}
     </div>
   );
 }
 
-function AssistantText({ text, isNew }: { text: string; isNew: boolean }) {
+// an assistant message, in teal like the timeline's llm calls
+function AssistantText({ text }: { text: string }) {
   return (
-    <div className={isNew ? "bubble assistant new" : "bubble assistant"}>
+    <div className="bubble assistant teal">
       <div className="who">assistant</div>
       <pre>{text}</pre>
     </div>
@@ -147,7 +166,9 @@ function TurnGroup({ group, number, open }: { group: ChatGroup; number: number; 
   return (
     <details className="chat-group" open={open}>
       <summary>
-        Turn {number}: {firstLine(group.user?.content) || "(no message)"}
+        Turn {number}
+        {/* the message preview is hidden while the turn is open, since the message itself shows below */}
+        <span className="turn-preview">: {firstLine(group.user?.content) || "(no message)"}</span>
       </summary>
       {group.user && (
         <div className="bubble user">
@@ -157,9 +178,9 @@ function TurnGroup({ group, number, open }: { group: ChatGroup; number: number; 
       )}
       {group.items.map((item, itemIndex) =>
         item.kind === "text" ? (
-          <AssistantText key={itemIndex} text={item.text} isNew={item.isNew} />
+          <AssistantText key={itemIndex} text={item.text} />
         ) : (
-          <ToolCard key={itemIndex} call={item.call} isNew={item.isNew} />
+          <ToolCard key={itemIndex} call={item.call} />
         ),
       )}
     </details>
@@ -167,8 +188,8 @@ function TurnGroup({ group, number, open }: { group: ChatGroup; number: number; 
 }
 
 // the system prompt, earlier turns folded into one "Chat history" dropdown, then the current turn open
-function Chat({ messages, newCount }: { messages: Message[]; newCount: number }) {
-  const { system, groups } = toChat(messages, messages.length - newCount);
+function Chat({ messages }: { messages: Message[] }) {
+  const { system, groups } = toChat(messages);
   const earlier = groups.slice(0, -1);
   const current = groups[groups.length - 1];
 
@@ -200,6 +221,13 @@ function Chat({ messages, newCount }: { messages: Message[]; newCount: number })
 
 function Step({ step }: { step: ReplayStep }) {
   const reply = step.response;
+  const tools: ToolCall[] = step.tools.map((tool) => ({
+    id: tool.tool_call_id,
+    name: tool.name ?? "?",
+    arguments: tool.arguments,
+    result: tool.result,
+    finished: tool.finished,
+  }));
 
   return (
     <div>
@@ -214,22 +242,31 @@ function Step({ step }: { step: ReplayStep }) {
       </p>
 
       <h4>Sent to the model ({step.messages.length} messages, {step.new_messages} new)</h4>
-      <Chat messages={step.messages} newCount={step.new_messages} />
+      <Chat messages={step.messages} />
 
+      {/* what the model said: its text, and which tools it asked for */}
       <h4>Model replied</h4>
       {reply === null ? (
         <p className="muted">No reply recorded: the call never came back.</p>
       ) : (
         <div className="chat">
-          {typeof reply.text === "string" && reply.text.trim() !== "" && <AssistantText text={reply.text} isNew />}
-          {step.tools.map((tool) => (
-            <ToolCard
-              key={tool.tool_call_id}
-              call={{ id: tool.tool_call_id, name: tool.name ?? "?", arguments: tool.arguments, result: tool.result, finished: tool.finished }}
-              isNew
-            />
+          {typeof reply.text === "string" && reply.text.trim() !== "" && <AssistantText text={reply.text} />}
+          {tools.map((call) => (
+            <ToolCard key={call.id} call={call} show="call" />
           ))}
         </div>
+      )}
+
+      {/* what those tools gave back: not from the model, it's sent to the model in the next step */}
+      {tools.length > 0 && (
+        <>
+          <h4>Tools returned</h4>
+          <div className="chat">
+            {tools.map((call) => (
+              <ToolCard key={call.id} call={call} show="result" />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

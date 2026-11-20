@@ -19,6 +19,12 @@ function formatDuration(seconds: number): string {
   return minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
 }
 
+// a duration in words: "9 seconds", "1 second", or "1m 4s" once it's a minute or more
+function describeDuration(seconds: number): string {
+  if (seconds >= 60) return formatDuration(seconds);
+  return seconds === 1 ? "1 second" : `${seconds} seconds`;
+}
+
 // any value as one line of text
 function text(value: unknown): string {
   if (value === undefined || value === null) return "";
@@ -31,8 +37,22 @@ function firstLine(value: unknown): string {
 
 // a tool call in a few words: the command for run_command, the path for files
 function describeTool(name: unknown, args: unknown): string {
+  return `${text(name)} ${toolTarget(args)}`;
+}
+
+// what a tool call works on: the command for run_command, the path for files
+function toolTarget(args: unknown): string {
   const fields = (args ?? {}) as Record<string, unknown>;
-  return `${text(name)} ${text(fields.cmd ?? fields.path ?? args)}`;
+  return text(fields.cmd ?? fields.path ?? args);
+}
+
+// a tool result counts as failed when it's an error message or a command that exited non-zero
+function toolFailed(result: unknown): boolean {
+  if (typeof result === "string") return result.startsWith("error:");
+  if (result && typeof result === "object" && "exit_code" in result) {
+    return (result as { exit_code: unknown }).exit_code !== 0;
+  }
+  return false;
 }
 
 // one line saying what an event was
@@ -110,11 +130,205 @@ function FailureSummary({ turn }: { turn: TurnSummary }) {
 }
 
 
+// ## AGENT OUTPUT ##
+
+// what the agent told the user: its first line, with a dropdown for the rest when there is more
+function AgentText({ text }: { text: string }) {
+  const [first, ...rest] = text.split("\n");
+  const shortFirst = first.length > SUMMARY_CHARS ? first.slice(0, SUMMARY_CHARS) + "…" : first;
+  const hasMore = rest.some((line) => line.trim() !== "") || shortFirst !== first;
+
+  if (!hasMore) {
+    return <div className="bubble agent"><pre>{first}</pre></div>;
+  }
+
+  return (
+    <details className="bubble agent">
+      <summary>{shortFirst}</summary>
+      <pre>{shortFirst !== first ? text : rest.join("\n")}</pre>
+    </details>
+  );
+}
+
+
+// ## TIMELINE PIECES ##
+
+// one timeline row: an ordinary event, or an llm_request paired with its llm_response as one "llm call"
+type TimelineItem =
+  | { seq: number; event: SandboxEvent; request?: undefined }
+  | { seq: number; request: SandboxEvent; response: SandboxEvent | null; event?: undefined };
+
+// a run of rows, or one divider (turn_started / turn_finished / turn_failed) between them
+type TimelinePiece = { divider: SandboxEvent; rows?: undefined } | { divider?: undefined; rows: TimelineItem[] };
+
+const DIVIDER_TYPES = ["turn_started", "turn_finished", "turn_failed"];
+
+// pairs each llm_request with the llm_response after it (before the next request); null while it's still waiting
+function timelineItems(events: SandboxEvent[]): TimelineItem[] {
+  const items: TimelineItem[] = [];
+  const paired = new Set<number>();   // responses already shown inside an llm call
+
+  events.forEach((event, index) => {
+    if (paired.has(event.seq)) return;
+
+    if (event.type !== "llm_request") {
+      items.push({ seq: event.seq, event });
+      return;
+    }
+
+    let response: SandboxEvent | null = null;
+    for (const later of events.slice(index + 1)) {
+      if (later.type === "llm_request") break;
+      if (later.type === "llm_response") {
+        response = later;
+        paired.add(later.seq);
+        break;
+      }
+    }
+    items.push({ seq: event.seq, request: event, response });
+  });
+
+  return items;
+}
+
+function timelinePieces(events: SandboxEvent[]): TimelinePiece[] {
+  const pieces: TimelinePiece[] = [];
+
+  for (const item of timelineItems(events)) {
+    const last = pieces[pieces.length - 1];
+    if (item.event && DIVIDER_TYPES.includes(item.event.type)) {
+      pieces.push({ divider: item.event });
+    } else if (last && last.rows) {
+      last.rows.push(item);
+    } else {
+      pieces.push({ rows: [item] });
+    }
+  }
+  return pieces;
+}
+
+// a divider's words: what happened and when; a finish or failure also says how long the turn took
+// (from the user's message, like the turn's "Took"), and a failure says why
+function dividerText(event: SandboxEvent, turnStartedAt: number): string {
+  const when = formatTime(event.at);
+  const took = `took ${describeDuration(event.at - turnStartedAt)}`;
+
+  if (event.type === "turn_started") return `turn started · ${when}`;
+  if (event.type === "turn_finished") return `turn finished · ${when} · ${took}`;
+
+  const why = [text(event.data.reason), event.data.cause && `cause: ${text(event.data.cause)}`].filter(Boolean).join(", ");
+  return `turn failed · ${when} · ${took}${why ? ` · ${why}` : ""}`;
+}
+
+
+// ## TOOLS ##
+
+// which tool a call used, as an outlined label, then what it worked on: "$ command" or the file's path
+function ToolLabel({ call }: { call: SandboxEvent | undefined }) {
+  if (!call) return <span className="tool-chip">tool</span>;
+
+  const name = text(call.data.name);
+  const target = toolTarget(call.data.arguments);
+
+  return (
+    <>
+      <span className="tool-chip">{name}</span>
+      <code className="tool-target">{name === "run_command" ? `$ ${target}` : target}</code>
+    </>
+  );
+}
+
+
+// ## LLM CALLS ##
+
+// the model, what went in (behind a toggle), then exactly what came out, each in a teal box
+function LlmCallDetails({ request, response }: { request: SandboxEvent; response: SandboxEvent | null }) {
+  const messages = Array.isArray(request.data.messages) ? (request.data.messages as Record<string, unknown>[]) : [];
+  const calls = response && Array.isArray(response.data.tool_calls) ? response.data.tool_calls : [];
+
+  return (
+    <div className="llm-call" onClick={(e) => e.stopPropagation()}>
+      <div className="llm-part">
+        <div className="llm-label">Model</div>
+        <div className="teal-box"><code>{text(request.data.model) || "not recorded"}</code></div>
+      </div>
+
+      <div className="llm-part">
+        <div className="llm-label">Input</div>
+        {messages.length === 0 ? (
+          <div className="muted">no messages recorded</div>
+        ) : (
+          <details>
+            <summary className="muted">{messages.length} messages</summary>
+            <div className="teal-box">
+              <pre>{JSON.stringify(messages, null, 2)}</pre>
+            </div>
+          </details>
+        )}
+      </div>
+
+      <div className="llm-part">
+        <div className="llm-label">Output</div>
+        {response === null ? (
+          <div className="muted">waiting for a response</div>
+        ) : (
+          // exactly what the model returned: its text as written (teal), and its tool calls as recorded (orange, like tools)
+          <div className="llm-output">
+            {typeof response.data.text === "string" && response.data.text.trim() !== "" && (
+              <div className="teal-box">
+                <pre>{response.data.text}</pre>
+              </div>
+            )}
+            {calls.length > 0 && (
+              <div className="orange-box">
+                <pre>{JSON.stringify(calls, null, 2)}</pre>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// ## TURN INFO (a turn row's dropdown) ##
+
+// the user's message, when the turn started, how long it took, and the agent's last action
+function TurnInfo({ turn }: { turn: TurnSummary }) {
+  const took = turn.ended_at !== null ? formatDuration(turn.ended_at - turn.started_at) : "still going";
+
+  return (
+    <div className="turn-info">
+      <div className="bubble user">
+        <div className="who">user</div>
+        <pre>{turn.message}</pre>
+      </div>
+      <dl>
+        <dt>Started</dt>
+        <dd>{formatTime(turn.started_at)}</dd>
+        <dt>Took</dt>
+        <dd>{took}</dd>
+        <dt>Last action</dt>
+        <dd>
+          {turn.last_action ? (
+            <><code>{turn.last_action.type}</code> {summarize(turn.last_action)}</>
+          ) : (
+            <span className="muted">none yet</span>
+          )}
+        </dd>
+      </dl>
+    </div>
+  );
+}
+
+
 // ## PAGE ##
 
 export default function SandboxDetail({ sandboxId, onBack }: { sandboxId: string; onBack: () => void }) {
   const [turns, setTurns] = useState<TurnSummary[] | null>(null);
   const [chosenTurn, setChosenTurn] = useState<number | null>(null);   // null: follow the newest turn
+  const [expanded, setExpanded] = useState<number[]>([]);              // turn rows whose info dropdown is open
   const [events, setEvents] = useState<SandboxEvent[]>([]);
   const [openSeq, setOpenSeq] = useState<number | null>(null);         // the event whose full data is shown
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +336,12 @@ export default function SandboxDetail({ sandboxId, onBack }: { sandboxId: string
 
   const shownTurn = chosenTurn ?? (turns && turns.length > 0 ? turns[turns.length - 1].turn : null);
   const turn = turns?.find((t) => t.turn === shownTurn);
+
+
+  // opens or closes one turn row's info, without choosing that turn for the timeline
+  function toggleInfo(number: number) {
+    setExpanded((list) => (list.includes(number) ? list.filter((n) => n !== number) : [...list, number]));
+  }
 
   // reload the turn summaries every few seconds
   useEffect(() => {
@@ -133,6 +353,11 @@ export default function SandboxDetail({ sandboxId, onBack }: { sandboxId: string
     const timer = setInterval(load, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [sandboxId]);
+
+  // each tool call's tool_started, so a tool result can say which tool and command it came from
+  const toolCalls = new Map(
+    events.filter((event) => event.type === "tool_started").map((event) => [text(event.data.tool_call_id), event]),
+  );
 
   // load the shown turn's events, then only the new ones every few seconds
   useEffect(() => {
@@ -164,6 +389,106 @@ export default function SandboxDetail({ sandboxId, onBack }: { sandboxId: string
     };
   }, [sandboxId, shownTurn]);
 
+  // an llm_request and its llm_response as one row: input size on one line, what came out on the next; click for the model and both
+  function llmCallRow(request: SandboxEvent, response: SandboxEvent | null) {
+    const count = Array.isArray(request.data.messages) ? request.data.messages.length : 0;
+    const open = openSeq === request.seq;
+
+    return (
+      <tr key={request.seq} className="clickable llm-row" onClick={() => setOpenSeq(open ? null : request.seq)}>
+        <td className="muted">{formatTime(request.at)}</td>
+        <td><span className="badge llm">llm call</span></td>
+        <td>
+          <div className="io-line">
+            <span className="io-label">Input</span> {count} messages
+          </div>
+          <div className="io-line">
+            <span className="io-label">Output</span>{" "}
+            {response ? summarize(response) || "(empty reply)" : <span className="muted">waiting for a response</span>}
+          </div>
+          {open && <LlmCallDetails request={request} response={response} />}
+        </td>
+      </tr>
+    );
+  }
+
+  // one timeline row; turn_started and turn_finished aren't rows, they're dividers between tables
+  function timelineRow(item: TimelineItem) {
+    if (item.request) {
+      return llmCallRow(item.request, item.response);
+    }
+
+    const event = item.event;
+    const toggle = () => setOpenSeq(openSeq === event.seq ? null : event.seq);
+
+    if (event.type === "user_message") {
+      // the user's message: highlighted and shown in full, since it's what the turn is about
+      return (
+        <tr key={event.seq} className="user-row">
+          <td className="muted">{formatTime(event.at)}</td>
+          <td><span className="badge user">{event.type}</span></td>
+          <td>
+            <div className="bubble user">
+              <pre>{String(event.data.text ?? "")}</pre>
+            </div>
+          </td>
+        </tr>
+      );
+    }
+
+    if (event.type === "agent_output" || event.type === "question") {
+      // what the agent told the user: its first line, with a dropdown for the rest
+      return (
+        <tr key={event.seq} className="agent-row">
+          <td className="muted">{formatTime(event.at)}</td>
+          <td><span className="badge agent">{event.type}</span></td>
+          <td><AgentText text={String(event.data.text ?? "")} /></td>
+        </tr>
+      );
+    }
+
+    if (event.type === "tool_started" || event.type === "tool_completed") {
+      // a tool the agent ran: its name and command, then whether it worked
+      const failed = toolFailed(event.data.result);
+      return (
+        <tr key={event.seq} className="clickable tool-row" onClick={toggle}>
+          <td className="muted">{formatTime(event.at)}</td>
+          <td><span className="badge tool">{event.type}</span></td>
+          <td>
+            {event.type === "tool_started" ? (
+              <ToolLabel call={event} />
+            ) : (
+              // the tool and command it answers (matched by tool_call_id, in case an agent runs several at once), then the result
+              <>
+                <div className="io-line">
+                  <span className="io-label">Input</span> <ToolLabel call={toolCalls.get(text(event.data.tool_call_id))} />
+                </div>
+                <div className="io-line">
+                  <span className="io-label">Output</span>{" "}
+                  <span className={failed ? "result failed" : "result"}>
+                    {failed ? "✗" : "✓"} {summarize(event)}
+                  </span>
+                </div>
+              </>
+            )}
+            {openSeq === event.seq && <pre>{JSON.stringify(event.data, null, 2)}</pre>}
+          </td>
+        </tr>
+      );
+    }
+
+    return (
+      <tr key={event.seq} className="clickable" onClick={toggle}>
+        <td className="muted">{formatTime(event.at)}</td>
+        <td><code>{event.type}</code></td>
+        <td>
+          {summarize(event)}
+          {openSeq === event.seq && <pre>{JSON.stringify(event.data, null, 2)}</pre>}
+        </td>
+      </tr>
+    );
+  }
+
   return (
     <main>
       <button onClick={onBack}>← All sandboxes</button>
@@ -186,30 +511,43 @@ export default function SandboxDetail({ sandboxId, onBack }: { sandboxId: string
           <table>
             <thead>
               <tr>
+                <th></th>
                 <th>Turn</th>
-                <th>Message</th>
                 <th>Status</th>
-                <th>Started</th>
-                <th>Took</th>
-                <th>Last action</th>
               </tr>
             </thead>
-            <tbody>
-              {turns.map((t) => (
-                <tr
-                  key={t.turn}
-                  className={t.turn === shownTurn ? "clickable chosen" : "clickable"}
-                  onClick={() => setChosenTurn(t.turn)}
-                >
-                  <td>{t.turn}</td>
-                  <td className="message-cell" title={t.message}>{firstLine(t.message)}</td>
-                  <td><span className={`badge ${t.status}`}>{t.status}</span></td>
-                  <td>{formatTime(t.started_at)}</td>
-                  <td>{t.ended_at !== null ? formatDuration(t.ended_at - t.started_at) : "…"}</td>
-                  <td className="muted">{t.last_action ? summarize(t.last_action) : ""}</td>
-                </tr>
-              ))}
-            </tbody>
+            {turns.map((t) => {
+              const infoOpen = expanded.includes(t.turn);
+              return (
+                // one tbody per turn: its row, and its info dropdown under it when open
+                <tbody key={t.turn}>
+                  <tr
+                    className={t.turn === shownTurn ? "clickable chosen" : "clickable"}
+                    onClick={() => setChosenTurn(t.turn)}
+                  >
+                    <td>
+                      <button
+                        className="link dropdown-icon"
+                        title={infoOpen ? "Hide this turn's info" : "Show more about this turn"}
+                        onClick={(e) => {
+                          e.stopPropagation();    // only the arrow opens the info; the row still picks the turn
+                          toggleInfo(t.turn);
+                        }}
+                      >
+                        ⋮
+                      </button>
+                    </td>
+                    <td>Turn {t.turn}</td>
+                    <td className="status-cell"><span className={`badge ${t.status}`}>{t.status}</span></td>
+                  </tr>
+                  {infoOpen && (
+                    <tr>
+                      <td colSpan={3}><TurnInfo turn={t} /></td>
+                    </tr>
+                  )}
+                </tbody>
+              );
+            })}
           </table>
 
           {turn && (
@@ -229,33 +567,25 @@ export default function SandboxDetail({ sandboxId, onBack }: { sandboxId: string
               {view === "replay" ? (
                 <Replay sandboxId={sandboxId} turn={turn.turn} lastSeq={turn.last_seq} />
               ) : (
-              <table className="timeline">
-                <tbody>
-                  {events.map((event) =>
-                    event.type === "user_message" ? (
-                      // the user's message: highlighted and shown in full, since it's what the turn is about
-                      <tr key={event.seq} className="user-row">
-                        <td className="muted">{formatTime(event.at)}</td>
-                        <td><span className="badge user">User</span></td>
-                        <td>
-                          <div className="bubble user">
-                            <pre>{String(event.data.text ?? "")}</pre>
-                          </div>
-                        </td>
-                      </tr>
+                // the timeline: tables of rows, split by faded dividers where the turn starts and finishes
+                <div>
+                  {timelinePieces(events).map((piece) =>
+                    piece.divider ? (
+                      <div key={piece.divider.seq} className={piece.divider.type === "turn_failed" ? "divider failed" : "divider"}>
+                        {dividerText(piece.divider, turn.started_at)}
+                      </div>
                     ) : (
-                      <tr key={event.seq} className="clickable" onClick={() => setOpenSeq(openSeq === event.seq ? null : event.seq)}>
-                        <td className="muted">{formatTime(event.at)}</td>
-                        <td><code>{event.type}</code></td>
-                        <td>
-                          {summarize(event)}
-                          {openSeq === event.seq && <pre>{JSON.stringify(event.data, null, 2)}</pre>}
-                        </td>
-                      </tr>
+                      <table key={piece.rows[0].seq} className="timeline">
+                        <colgroup>
+                          <col className="time-column" />
+                          <col className="type-column" />
+                          <col />
+                        </colgroup>
+                        <tbody>{piece.rows.map(timelineRow)}</tbody>
+                      </table>
                     ),
                   )}
-                </tbody>
-              </table>
+                </div>
               )}
             </>
           )}

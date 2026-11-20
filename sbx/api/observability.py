@@ -33,6 +33,23 @@ ACTION_TYPES = (
 HOST_REASONS = ("server restarted", "runner error", "agent failed to start", "AGENT_CMD is not set")
 
 
+## WHAT LEAVES THE HOST ##
+
+# fields kept in state.db for the team, but never sent out: they show host paths and agent versions
+HOST_ONLY_FIELDS = {
+    EventType.TURN_STARTED: ("agent_cmd", "agent_hash"),
+}
+
+
+def for_clients(event: Event) -> Event:
+    """The event without its host-only fields, for API responses and the agent's history file."""
+    hidden = HOST_ONLY_FIELDS.get(event.type)
+    if not hidden:
+        return event
+    data = {key: value for key, value in event.data.items() if key not in hidden}
+    return event.model_copy(update={"data": data})
+
+
 ## TURNS ##
 
 def split_into_turns(events: list[Event]) -> list[list[Event]]:

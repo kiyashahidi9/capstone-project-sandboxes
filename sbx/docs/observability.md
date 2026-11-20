@@ -10,7 +10,7 @@ Nothing new is stored. Everything is read from the existing `events` table in `s
 |-------|-------|------|
 | Step events | Agent → runner | The agent prints `llm_request`, `llm_response`, `tool_started` and `tool_completed` lines ([agent contract](agent_contract.md)). The example agent does this |
 | Shared history | `sdk/history.py` | Rebuilds the chat from events. The example agent builds its context with it, and so does replay |
-| Agent version | `runner/runner.py` | `turn_started` gets `agent_cmd` and `agent_hash` |
+| Agent version | `runner/runner.py` | `turn_started` stores `agent_cmd` and `agent_hash`, for the team only |
 | Failure cause | `runner/runner.py` | A failed turn's `turn_failed` gets a `cause` |
 | Turns and replay | `api/observability.py` | Groups events into turns, sums each one up, and replays its model calls |
 | Endpoints | `api/main.py` | Read-only; also work for destroyed sandboxes |
@@ -48,6 +48,7 @@ Replay rebuilds what the model was sent at each step, from events alone. It neve
 | Tool `result` | Exactly what the model was given (a write gives `"ok"`) | Replay must rebuild the model's input, not a richer record. The written content is still in `tool_started` |
 | A call left unanswered | Gets `error: the turn ended before this tool finished` in later turns | OpenAI refuses a chat with an unanswered tool call |
 | Agent version | `agent_cmd` plus a 12-digit hash of the files in the agent's folder (e.g. `/opt/agents`) | Shows when a different agent ran. The SDK in the agent's venv isn't part of the hash |
+| Host-only fields | `agent_cmd` and `agent_hash` stay in `state.db` but are left out of every API response and the agent's history file (`HOST_ONLY_FIELDS`) | They show host paths, and clients have no use for them. Read them with `sqlite3` on the host |
 
 ## Turn statuses
 

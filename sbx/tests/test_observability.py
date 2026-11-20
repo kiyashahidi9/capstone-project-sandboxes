@@ -175,3 +175,17 @@ def test_turns_endpoint_sees_a_working_agent(client):
     turns = client.get(f"/sandboxes/{SANDBOX_ID}/turns").json()["turns"]
 
     assert turns[-1]["status"] == "running"
+
+
+## HOST-ONLY FIELDS ##
+
+def test_events_endpoint_leaves_out_the_agent_command_and_hash(client):
+    db.append_event(SANDBOX_ID, EventType.USER_MESSAGE, {"text": "again"})
+    db.append_event(SANDBOX_ID, EventType.TURN_STARTED, {"agent_cmd": "/opt/agents/.venv/bin/python /opt/agents/agent.py", "agent_hash": "abc123def456"})
+
+    sent = client.get(f"/sandboxes/{SANDBOX_ID}/events").json()["events"]
+    one_turn = client.get(f"/sandboxes/{SANDBOX_ID}/events", params={"turn": 3}).json()["events"]
+
+    started = [event for event in sent + one_turn if event["type"] == "turn_started" and event["seq"] > 10]
+    assert [event["data"] for event in started] == [{}, {}]
+    assert db.list_events(SANDBOX_ID)[-1].data["agent_hash"] == "abc123def456"     # still stored for the team

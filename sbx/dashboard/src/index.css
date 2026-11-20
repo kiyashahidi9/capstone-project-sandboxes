@@ -40,7 +40,7 @@ th {
   font-size: 12px;
   text-transform: capitalize;
 }
-.badge.running { background: #dafbe1; color: #116329; }
+.badge.running { background: #eefbf1; color: #2c8a48; }
 .badge.starting, .badge.pausing, .badge.resuming { background: #fff8c5; color: #7d4e00; }
 .badge.paused  { background: #fbefff; color: #6639ba; }
 .badge.working  { background: #ddf4ff; color: #0550ae; }
@@ -111,9 +111,9 @@ header {
 
 /* ## OBSERVABILITY ## */
 
-.badge.finished    { background: #dafbe1; color: #116329; }
+.badge.finished    { background: #eefbf1; color: #2c8a48; }
 .badge.failed      { background: #ffebe9; color: #82071e; }
-.badge.unresponsive { background: #fff1e5; color: #953800; }
+.badge.unresponsive { background: #fff8f2; color: #bc4c00; }
 .badge.incomplete, .badge.destroyed { background: #eaeef2; color: #57606a; }
 
 button.link {
@@ -126,12 +126,13 @@ button.link {
 }
 button.link:hover { background: none; text-decoration: underline; }
 
+.timeline td { vertical-align: top; font-size: 13px; }
+.timeline td:first-child { white-space: nowrap; }
+
 tr.clickable { cursor: pointer; }
 tr.clickable:hover { background: #f6f8fa; }
 tr.chosen { background: #ddf4ff; }
 
-.timeline td { vertical-align: top; font-size: 13px; }
-.timeline td:first-child { white-space: nowrap; }
 
 pre {
   max-height: 400px;
@@ -198,17 +199,15 @@ details.chat-group > .bubble, details.chat-group > .tool-card { margin-bottom: 6
   max-width: 85%;
   padding: 6px 10px;
   border: 1px solid #d0d7de;
-  border-left: 3px solid #0969da;
+  border-left: 3px solid #fdd0ad;
   border-radius: 6px;
   background: white;
   font-size: 13px;
 }
 .tool-card summary { cursor: pointer; }
-.result { color: #116329; }
+.result { color: #2c8a48; }
 .result.failed { color: #cf222e; }
 
-/* messages added since the previous step */
-.bubble.new, .tool-card.new { box-shadow: 0 0 0 2px #54aeff; }
 
 
 details.chat-history {
@@ -221,15 +220,146 @@ details.chat-history > summary { cursor: pointer; font-size: 13px; font-weight: 
 details.chat-history[open] > summary { margin-bottom: 8px; }
 details.chat-history > details.chat-group { margin-bottom: 6px; }
 
+.badge.user { background: #ddf4ff; color: #0550ae; }
+
+/* the turns table's status column takes the spare width, so turn rows stay compact */
+td.status-cell { width: 100%; }
+
+/* a turn row's info dropdown, under its row in the turns table */
+.turn-info { padding: 4px 4px 8px; font-size: 13px; }
+.turn-info .bubble.user { margin-left: 0; max-width: none; margin-bottom: 8px; }
+.turn-info dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+.turn-info dt { color: #57606a; }
+.turn-info dd { margin: 0; }
+
+/* what the agent told the user, in the timeline */
+tr.agent-row { background: #fdfbff; }
+tr.agent-row td:first-child { box-shadow: inset 3px 0 0 #e2d4ff; }
+/* in the timeline the whole row carries the color, so the text needs no box of its own */
+tr.agent-row .bubble.agent { padding: 0; border: none; background: none; }
+.bubble.agent { max-width: none; background: #f9f5ff; border: 1px solid #ece2ff; }
+.bubble.agent summary { cursor: pointer; white-space: pre-wrap; }
+.bubble.agent[open] summary { margin-bottom: 2px; }
+.badge.agent { background: #f3ecff; color: #6e40c9; }
+
+/* the turn rows' dropdown dots, at the start of each row */
+button.dropdown-icon {
+  padding: 0 4px;
+  font-size: 20px;
+  line-height: 1;
+  color: #afb8c1;
+}
+button.dropdown-icon:hover { color: #57606a; text-decoration: none; }
+
+/* tools the agent ran, in the timeline (orange, like the replay's tool cards) */
+tr.tool-row { background: #fffdfa; }
+tr.tool-row td:first-child { box-shadow: inset 3px 0 0 #fdd0ad; }
+.badge.tool {: #fff8f2; color: #bc4c00; }
+code.tool-name { font-weight: 600; }
+
+/* a replay turn's title shows its message only while closed */
+details.chat-group[open] > summary .turn-preview { display: none; }
+
+/* timeline badges that show the raw event type: as written, in code font */
+.badge.user, .badge.agent, .badge.tool { text-transform: none; font-family: monospace; }
+
+
+/* turn_started and turn_finished in the timeline: a faded line on the page background, between the tables of rows */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  font-size: 11px;
+  color: #8c959f;
+}
+.divider::before, .divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid #d8dee4;
+}
+
+
+/* an llm_request and its llm_response, shown as one "llm call" row (teal) */
+tr.llm-row { background: #fbfefd; }
+tr.llm-row td:first-child { box-shadow: inset 3px 0 0 #c4ebe6; }
+.badge.llm { background: #eaf8f6; color: #1f7a73; text-transform: none; font-family: monospace; }
+.llm-call {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 4px 2px 6px;
+  cursor: default;
+}
+.llm-part { min-width: 0; }
+.llm-label { margin-bottom: 6px; font-size: 13px; font-weight: 700; color: #24292f; }
+.llm-part details > summary { cursor: pointer; margin-bottom: 6px; }
+.teal-box {
+  padding: 8px 12px;
+  border: 1px solid #d6f0ed;
+  border-radius: 6px;
+  background: #f4fbfa;
+}
+.teal-box pre { margin: 0 0 4px; padding: 0; background: none; max-height: 300px; }
+.teal-box > div + div { margin-top: 4px; }
+
+/* turn_failed's divider: the same faded line, in red so a failure still stands out */
+.divider.failed { color: #cf222e; font-weight: 600; }
+.divider.failed::before, .divider.failed::after { border-top-color: #ffcecb; }
+
+/* a tool card's opened arguments or result, in the replay */
+.tool-card details > summary { margin-bottom: 4px; }
+.tool-card .teal-box { margin-bottom: 6px; }
+
+/* assistant messages in the replay, in the same teal as the other boxes */
+.bubble.assistant.teal { background: #f4fbfa; border: 1px solid #d6f0ed; }
+
+/* which tool a timeline row is about: an outlined label, then its command or path */
+.tool-chip {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 10px;
+  background: white;
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #57606a;
+}
+.tool-target { color: #24292f; }
+
+/* the llm call's output: text in teal, tool calls in orange (like the timeline's tool rows) */
+.llm-output { display: flex; flex-direction: column; gap: 6px; }
+.orange-box {
+  padding: 8px 12px;
+  border: 1px solid #fdd0ad;
+  border-radius: 6px;
+  background: #fff8f2;
+}
+.orange-box pre { margin: 0; padding: 0; background: none; max-height: 300px; }
+
 /* the user's message in the timeline */
 tr.user-row { background: #f0f8ff; }
 tr.user-row .bubble.user { margin-left: 0; max-width: none; }
-.badge.user { background: #ddf4ff; color: #0550ae; }
 
-/* the turns table's message column: one line, cut with … when long (hover shows it all) */
-td.message-cell {
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* the timeline's tables share fixed column widths, so they line up across dividers */
+table.timeline { table-layout: fixed; }
+table.timeline col.time-column { width: 90px; }
+table.timeline col.type-column { width: 150px; }
+
+/* an llm call's or tool result's input and output, each on its own labeled line */
+.io-line + .io-line { margin-top: 4px; }
+.io-label {
+  display: inline-block;
+  width: 52px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8c959f;
 }

@@ -511,3 +511,18 @@ def test_the_agent_hash_changes_when_any_agent_file_changes(tmp_path, monkeypatc
 def test_agent_version_without_a_file_keeps_just_the_command():
     assert runner.agent_version("") == {}
     assert runner.agent_version("no-such-program --flag") == {"agent_cmd": "no-such-program --flag"}
+
+
+def test_the_agents_history_leaves_out_the_agent_command_and_hash(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, """
+import json, os
+history = json.load(open(os.environ["SANDBOX_HISTORY"]))
+print(json.dumps([event["data"] for event in history if event["type"] == "turn_started"]))
+""")
+    send("first")
+    runner.run_turn(SANDBOX_ID)
+    send("second")
+    runner.run_turn(SANDBOX_ID)
+
+    *_, (kind, data), _ = events()
+    assert (kind, data) == (EventType.AGENT_OUTPUT, {"text": "[{}]"})

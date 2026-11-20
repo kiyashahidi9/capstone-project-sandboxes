@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 import locks
 import node_agent
-from api import auth, db
+from api import auth, db, observability
 from api.models import EventType, FailureCause, SandboxState, TurnState
 
 
@@ -120,7 +120,7 @@ def run_locked_turn(sandbox_id: str, turn: Turn) -> None:
 
     events = db.list_events(sandbox_id)
     message = next(event for event in reversed(events) if event.type == EventType.USER_MESSAGE)
-    history = [event.model_dump() for event in events if event.seq < message.seq]
+    history = [observability.for_clients(event).model_dump() for event in events if event.seq < message.seq]
 
     token = auth.new_turn_token(sandbox_id)
     history_path = write_history(history)
