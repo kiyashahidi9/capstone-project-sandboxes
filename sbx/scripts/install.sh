@@ -42,8 +42,11 @@ REPO_URL=https://github.com/kiyashahidi9/capstone-project-sandboxes.git
 LOCAL_REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 REMOTE_REPO=/home/$VM_USER/capstone-project-sandboxes
 AGENT_UPLOAD=/home/$VM_USER/agent-upload
+UPLOAD_DIR=/home/$VM_USER/.sbx-upload      # private (700) folder files are copied into before moving into place
 SSH_TRIES=24                      # a new VM takes up to about two minutes to accept SSH
 SSH_WAIT_SECONDS=5
+BILLING_TRIES=4                   # the billing check can hit Google's per-minute rate limit (429)
+BILLING_WAIT_SECONDS=20
 ADMIN_KEY=""                      # set only when this run makes a new .env
 SERVICE=sbx-api
 API_TRIES=15                      # the API takes a few seconds to start
@@ -82,8 +85,20 @@ current_project() {
 }
 
 # Stops unless billing is turned on for the project.
+# a failed check (e.g. Google's 429 "quota exceeded" rate limit) is retried, not mistaken for billing being off
 require_billing() {
-  [[ $(gcloud billing projects describe "$PROJECT" --format='value(billingEnabled)') == True ]] \
+  local enabled="" try
+  for ((try = 1; try <= BILLING_TRIES; try++)); do
+    if enabled=$(gcloud billing projects describe "$PROJECT" --format='value(billingEnabled)' 2>/dev/null); then
+      break
+    fi
+    enabled=""
+    echo "   couldn't check billing (Google may be rate-limiting), trying again in ${BILLING_WAIT_SECONDS}s..." >&2
+    sleep "$BILLING_WAIT_SECONDS"
+  done
+
+  [[ -n $enabled ]] || die "couldn't check billing for $PROJECT after $BILLING_TRIES tries; wait a minute and rerun"
+  [[ $enabled == True ]] \
     || die "turn on billing for $PROJECT: https://console.cloud.google.com/billing/linkedaccount?project=$PROJECT"
 }
 
@@ -152,8 +167,19 @@ turn_off_os_login() {
 
 # Runs a command on the VM as the shared sbx user.
 vm_ssh() {
-  # --command, not "-- cmd": gcloud then opens no terminal, so output has no stray \r and stdin can be piped in
+  # --command, not "-- cmd": gcloud then opens no terminal, so output has no stray \r
+  # never pipe input into it: on Windows gcloud uses PuTTY, which sends "y" (its host-key answer) instead
   gcloud compute ssh "$VM_USER@$VM_NAME" --zone="$ZONE" --quiet --command="$*"
+}
+
+# Copies one local file into a private folder in the sbx user's home on the VM, and gives its path there.
+# A file copy works the same from macOS, Linux and Windows, unlike piping into vm_ssh.
+vm_upload() {
+  local name
+  name=$(basename "$1")
+  vm_ssh "install -d -m 700 $UPLOAD_DIR" >/dev/null
+  gcloud compute scp "$1" "$VM_USER@$VM_NAME:$UPLOAD_DIR/$name" --zone="$ZONE" --quiet >/dev/null
+  echo "$UPLOAD_DIR/$name"
 }
 
 # Waits until the VM accepts SSH, which takes up to about two minutes after it's created.
@@ -203,7 +229,15 @@ write_env() {
   echo
   [[ -n $openai_key ]] || die "an OpenAI key is required"
   ADMIN_KEY=$(openssl rand -hex 32)
-  env_contents "$openai_key" | vm_ssh "sudo tee $REMOTE_REPO/.env >/dev/null && sudo chmod 600 $REMOTE_REPO/.env"
+
+  # a local file only this user can read, copied over, then moved into place as root-only; never on a command line
+  local file uploaded
+  file=$(mktemp)
+  chmod 600 "$file"
+  env_contents "$openai_key" > "$file"
+  uploaded=$(vm_upload "$file") || { rm -f "$file"; die "couldn't copy the .env to the VM"; }
+  rm -f "$file"
+  vm_ssh "sudo install -m 600 -o root -g root $uploaded $REMOTE_REPO/.env && rm -f $uploaded"
 }
 
 # Gives the text of a new .env for this host.
@@ -223,9 +257,14 @@ send_agent() {
   local parent name
   parent=$(dirname "$AGENT_PATH")
   name=$(basename "$AGENT_PATH")
-  COPYFILE_DISABLE=1 tar -C "$parent" --no-xattrs -czf - \
-      --exclude='.env*' --exclude=.venv --exclude=.git --exclude=__pycache__ "$name" \
-    | vm_ssh "rm -rf $AGENT_UPLOAD && mkdir -p $AGENT_UPLOAD && tar -xzf - -C $AGENT_UPLOAD"
+  # packed into a local file and copied over, since piping into vm_ssh doesn't work from Windows
+  local archive uploaded
+  archive=$(mktemp)
+  COPYFILE_DISABLE=1 tar -C "$parent" --no-xattrs -czf "$archive" \
+      --exclude='.env*' --exclude=.venv --exclude=.git --exclude=__pycache__ "$name"
+  uploaded=$(vm_upload "$archive") || { rm -f "$archive"; die "couldn't copy the agent to the VM"; }
+  rm -f "$archive"
+  vm_ssh "rm -rf $AGENT_UPLOAD && mkdir -p $AGENT_UPLOAD && tar -xzf $uploaded -C $AGENT_UPLOAD && rm -f $uploaded"
 }
 
 # Locks the agent down on the VM, installing the client's agent first when --agent was given.
