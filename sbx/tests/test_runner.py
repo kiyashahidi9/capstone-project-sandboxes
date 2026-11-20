@@ -119,8 +119,10 @@ def database(tmp_path, monkeypatch):
 
 
 def use_agent(tmp_path, monkeypatch, source: str, timeout: float = WAIT) -> None:
-    """Writes a fake agent to a file and makes it the AGENT_CMD."""
-    script = tmp_path / "agent.py"
+    """Writes a fake agent to its own folder (like /opt/agents) and makes it the AGENT_CMD."""
+    folder = tmp_path / "agents"
+    folder.mkdir(exist_ok=True)
+    script = folder / "agent.py"
     script.write_text(source)
     monkeypatch.setenv("AGENT_CMD", shlex.join([sys.executable, str(script)]))
     monkeypatch.setenv("AGENT_TURN_TIMEOUT", str(timeout))
@@ -154,7 +156,7 @@ def test_two_lines_then_exit_zero_finishes_the_turn(tmp_path, monkeypatch):
 
     assert events() == [
         (EventType.USER_MESSAGE, {"text": "do the thing"}),
-        (EventType.TURN_STARTED, {}),
+        (EventType.TURN_STARTED, runner.agent_version(os.environ["AGENT_CMD"])),
         (EventType.AGENT_OUTPUT, {"text": "one"}),
         (EventType.AGENT_OUTPUT, {"text": "two"}),
         (EventType.TURN_FINISHED, {"exit_code": 0}),
@@ -162,8 +164,15 @@ def test_two_lines_then_exit_zero_finishes_the_turn(tmp_path, monkeypatch):
     assert_turn_over()
 
 
+def fake_vm(monkeypatch, answers: bool) -> None:
+    """Makes the runner's VM check see a healthy VM, or a dead one."""
+    monkeypatch.setattr(runner.host_manager, "is_sandbox_running", lambda sandbox_id: answers)
+    monkeypatch.setattr(runner.host_manager, "sandbox_manager_is_healthy", lambda sandbox_id: answers)
+
+
 def test_exit_one_fails_the_turn_with_the_end_of_stderr(tmp_path, monkeypatch):
     use_agent(tmp_path, monkeypatch, FAILS)
+    fake_vm(monkeypatch, answers=True)
     send()
 
     runner.run_turn(SANDBOX_ID)
@@ -171,8 +180,46 @@ def test_exit_one_fails_the_turn_with_the_end_of_stderr(tmp_path, monkeypatch):
     *_, output, (last_type, last_data) = events()
     assert output == (EventType.AGENT_OUTPUT, {"text": "working on it"})
     assert last_type == EventType.TURN_FAILED
-    assert last_data == {"reason": "exit", "exit_code": 1, "stderr_tail": "something broke"}
+    assert last_data == {"reason": "exit", "cause": "agent", "exit_code": 1, "stderr_tail": "something broke"}
     assert_turn_over()
+
+
+def test_a_failed_turn_on_a_dead_vm_blames_the_sandbox(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, FAILS)
+    fake_vm(monkeypatch, answers=False)
+    send()
+
+    runner.run_turn(SANDBOX_ID)
+
+    *_, (last_type, last_data) = events()
+    assert last_type == EventType.TURN_FAILED
+    assert last_data["cause"] == "sandbox"
+
+
+def test_a_vm_check_that_breaks_gives_an_unknown_cause(monkeypatch):
+    def broken(sandbox_id):
+        raise RuntimeError("no pid file")
+
+    monkeypatch.setattr(runner.host_manager, "is_sandbox_running", broken)
+
+    assert runner.failure_cause(SANDBOX_ID, "exit") == "unknown"
+    assert runner.failure_cause(SANDBOX_ID, "paused") == "paused"
+
+
+def test_very_long_text_in_an_event_is_cut(tmp_path, monkeypatch):
+    long_text = "x" * (runner.MAX_TEXT_CHARS + 10)
+    use_agent(tmp_path, monkeypatch, f"""
+import json
+print("{long_text}")
+print(json.dumps({{"type": "tool_completed", "tool_call_id": "c1", "result": {{"stdout": "{long_text}"}}}}))
+""")
+    send()
+
+    runner.run_turn(SANDBOX_ID)
+
+    cut = "x" * runner.MAX_TEXT_CHARS + "\n[truncated 10 characters]"
+    assert (EventType.AGENT_OUTPUT, {"text": cut}) in events()
+    assert (EventType.TOOL_COMPLETED, {"tool_call_id": "c1", "result": {"stdout": cut}}) in events()
 
 
 def test_a_step_line_is_stored_as_its_own_event(tmp_path, monkeypatch):
@@ -183,7 +230,7 @@ def test_a_step_line_is_stored_as_its_own_event(tmp_path, monkeypatch):
 
     assert events() == [
         (EventType.USER_MESSAGE, {"text": "do the thing"}),
-        (EventType.TURN_STARTED, {}),
+        (EventType.TURN_STARTED, runner.agent_version(os.environ["AGENT_CMD"])),
         (EventType.LLM_REQUEST, {
             "model": "gpt-4.1",
             "system": "You are a coding agent.",
@@ -241,6 +288,26 @@ def test_a_question_line_becomes_a_question_event(tmp_path, monkeypatch):
         (EventType.TURN_FINISHED, {"exit_code": 0}),
     ]
     assert_turn_over()
+
+
+def test_blank_lines_are_skipped_and_an_output_line_keeps_its_lines_together(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, r"""
+import json
+print("")
+print("   ")
+print(json.dumps({"type": "agent_output", "text": "Fixed it.\n\n- changed the port\n- reran the tests"}))
+print(json.dumps({"type": "agent_output", "text": "  \n "}))
+print("plain line")
+""")
+    send()
+
+    runner.run_turn(SANDBOX_ID)
+
+    assert events()[2:] == [
+        (EventType.AGENT_OUTPUT, {"text": "Fixed it.\n\n- changed the port\n- reran the tests"}),
+        (EventType.AGENT_OUTPUT, {"text": "plain line"}),
+        (EventType.TURN_FINISHED, {"exit_code": 0}),
+    ]
 
 
 def test_an_agent_past_the_time_limit_is_killed(tmp_path, monkeypatch):
@@ -442,3 +509,46 @@ def test_lockdown_is_on_unless_turned_off(monkeypatch):
 
     monkeypatch.setenv("AGENT_ISOLATION", "none")
     assert not runner.locked_down()
+
+
+## WHICH AGENT RAN ##
+
+def test_turn_started_names_the_agent_and_hashes_its_folder(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, TWO_LINES)
+    send()
+
+    runner.run_turn(SANDBOX_ID)
+
+    started = next(data for kind, data in events() if kind == EventType.TURN_STARTED)
+    assert started["agent_cmd"] == os.environ["AGENT_CMD"]
+    assert len(started["agent_hash"]) == 12
+
+
+def test_the_agent_hash_changes_when_any_agent_file_changes(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, TWO_LINES)
+    before = runner.agent_version(os.environ["AGENT_CMD"])["agent_hash"]
+
+    (tmp_path / "agents" / "tools.py").write_text("# a helper next to the agent")
+    after = runner.agent_version(os.environ["AGENT_CMD"])["agent_hash"]
+
+    assert before != after
+
+
+def test_agent_version_without_a_file_keeps_just_the_command():
+    assert runner.agent_version("") == {}
+    assert runner.agent_version("no-such-program --flag") == {"agent_cmd": "no-such-program --flag"}
+
+
+def test_the_agents_history_leaves_out_the_agent_command_and_hash(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, """
+import json, os
+history = json.load(open(os.environ["SANDBOX_HISTORY"]))
+print(json.dumps([event["data"] for event in history if event["type"] == "turn_started"]))
+""")
+    send("first")
+    runner.run_turn(SANDBOX_ID)
+    send("second")
+    runner.run_turn(SANDBOX_ID)
+
+    *_, (kind, data), _ = events()
+    assert (kind, data) == (EventType.AGENT_OUTPUT, {"text": "[{}]"})

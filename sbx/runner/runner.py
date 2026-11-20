@@ -7,6 +7,7 @@ turns every line it prints into an event, and knows when the turn starts and end
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 import os
 import secrets
@@ -18,14 +19,16 @@ import threading
 from dataclasses import dataclass, field
 
 import locks
-from api import auth, db
-from api.models import EventType, SandboxState, TurnState
+import host_manager
+from api import auth, db, observability
+from api.models import EventType, FailureCause, SandboxState, TurnState
 
 
 ## CONFIG ##
 
 DEFAULT_TURN_TIMEOUT = 1800       # seconds; override with AGENT_TURN_TIMEOUT in .env
 STDERR_LINES_KEPT = 50            # how much of stderr a failed turn saves
+MAX_TEXT_CHARS = 64_000          # longer text in an event is cut, so one huge output can't bloat state.db
 AGENT_SANDBOX_API = "http://127.0.0.1:8000"   # where the agent reaches the API, given as SANDBOX_API
 AI_KEY_NAMES = ("OPENAI_API_KEY",)            # the only secrets from .env the agent gets
 
@@ -115,21 +118,21 @@ def run_turn(sandbox_id: str) -> None:
 
 def run_locked_turn(sandbox_id: str, turn: Turn) -> None:
     """Does the turn's work; run_turn holds the sandbox's lock and cleans up afterwards."""
-    db.append_event(sandbox_id, EventType.TURN_STARTED, {})
+    command = os.environ.get("AGENT_CMD", "").strip()
+    db.append_event(sandbox_id, EventType.TURN_STARTED, agent_version(command))
 
     row = db.get_sandbox(sandbox_id)
     if turn.stopped or row is None or row.state != SandboxState.RUNNING:
         db.append_event(sandbox_id, EventType.TURN_FAILED, {"reason": "paused"})
         return
 
-    command = os.environ.get("AGENT_CMD", "").strip()
     if not command:
         db.append_event(sandbox_id, EventType.TURN_FAILED, {"reason": "AGENT_CMD is not set"})
         return
 
     events = db.list_events(sandbox_id)
     message = next(event for event in reversed(events) if event.type == EventType.USER_MESSAGE)
-    history = [event.model_dump() for event in events if event.seq < message.seq]
+    history = [observability.for_clients(event).model_dump() for event in events if event.seq < message.seq]
 
     token = auth.new_turn_token(sandbox_id)
     history_path = write_history(history)
@@ -139,6 +142,47 @@ def run_locked_turn(sandbox_id: str, turn: Turn) -> None:
     finally:
         auth.drop_turn_token(token)
         os.remove(history_path)
+
+
+## WHICH AGENT RAN ##
+
+def agent_version(command: str) -> dict:
+    """
+    Which agent ran a turn, for turn_started (docs/observability.md)
+    its command, and a short hash of the files in its folder, so a changed agent shows up in the history
+    the folder is the one holding the script the command names (e.g. /opt/agents for /opt/agents/agent.py)
+    """
+    if not command:
+        return {}
+
+    version: dict = {"agent_cmd": command}
+    arguments = shlex.split(command)
+
+    # prefer a script after the program (python agent.py), else the program itself (./agent)
+    files = [argument for argument in arguments[1:] if os.path.isfile(argument)]
+    if not files and os.path.isfile(arguments[0]):
+        files = [arguments[0]]
+
+    if files:
+        try:
+            version["agent_hash"] = folder_hash(os.path.dirname(os.path.abspath(files[-1])))
+        except OSError:
+            pass
+    return version
+
+
+def folder_hash(folder: str) -> str:
+    """The first 12 hex digits of a SHA-256 over every file's name and contents in the folder (not subfolders)."""
+    digest = hashlib.sha256()
+
+    for name in sorted(os.listdir(folder)):
+        path = os.path.join(folder, name)
+        if not os.path.isfile(path):
+            continue
+        with open(path, "rb") as file:
+            digest.update(name.encode() + b"\0" + hashlib.sha256(file.read()).digest())
+
+    return digest.hexdigest()[:12]
 
 
 ## FILES FOR THE AGENT ##
@@ -337,26 +381,49 @@ RECORDED_STEPS: dict[str, EventType] = {
 def record_line(sandbox_id: str, line: str) -> None:
     """
     Saves one line the agent printed
+    a blank line is skipped
     a JSON object with "type": "question" is a question
+    a JSON object with "type": "agent_output" is one output event, even when its text has many lines
     a JSON object with a recorded step type is that event
-    anything else is plain output
+    anything else is plain output, one event per line
     """
+    if not line.strip():
+        return
+
     try:
         parsed = json.loads(line)
     except ValueError:
         parsed = None
 
     if isinstance(parsed, dict) and parsed.get("type") == "question":
-        db.append_event(sandbox_id, EventType.QUESTION, {"text": str(parsed.get("text", ""))})
+        db.append_event(sandbox_id, EventType.QUESTION, {"text": capped(str(parsed.get("text", "")))})
+        return
+
+    if isinstance(parsed, dict) and parsed.get("type") == "agent_output":
+        text = str(parsed.get("text", ""))
+        if text.strip():
+            db.append_event(sandbox_id, EventType.AGENT_OUTPUT, {"text": capped(text)})
         return
 
     step: EventType | None = RECORDED_STEPS.get(parsed.get("type")) if isinstance(parsed, dict) else None
     if isinstance(parsed, dict) and step is not None:
         data: dict = {key: value for key, value in parsed.items() if key != "type"}
-        db.append_event(sandbox_id, step, data)
+        db.append_event(sandbox_id, step, capped(data))
         return
 
-    db.append_event(sandbox_id, EventType.AGENT_OUTPUT, {"text": line})
+    db.append_event(sandbox_id, EventType.AGENT_OUTPUT, {"text": capped(line)})
+
+
+def capped(value):
+    """Cuts every string longer than MAX_TEXT_CHARS, inside dicts and lists too, and says how much was cut."""
+    if isinstance(value, str) and len(value) > MAX_TEXT_CHARS:
+        cut = len(value) - MAX_TEXT_CHARS
+        return value[:MAX_TEXT_CHARS] + f"\n[truncated {cut} characters]"
+    if isinstance(value, dict):
+        return {key: capped(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [capped(item) for item in value]
+    return value
 
 
 def record_end(sandbox_id: str, turn: Turn, exit_code: int, stderr_tail: str) -> None:
@@ -374,8 +441,25 @@ def record_end(sandbox_id: str, turn: Turn, exit_code: int, stderr_tail: str) ->
     db.append_event(
         sandbox_id,
         EventType.TURN_FAILED,
-        {"reason": reason, "exit_code": exit_code, "stderr_tail": stderr_tail},
+        {"reason": reason, "cause": failure_cause(sandbox_id, reason), "exit_code": exit_code, "stderr_tail": stderr_tail},
     )
+
+
+def failure_cause(sandbox_id: str, reason: str) -> FailureCause:
+    """
+    Whose fault a failed turn was (docs/observability.md)
+    paused: a user or auto-pause stopped it
+    otherwise, checks the VM: still answering means the agent failed, not answering means the sandbox did
+    """
+    if reason == "paused":
+        return FailureCause.PAUSED
+
+    try:
+        vm_answers = host_manager.is_sandbox_running(sandbox_id) and host_manager.sandbox_manager_is_healthy(sandbox_id)
+    except Exception:
+        return FailureCause.UNKNOWN
+
+    return FailureCause.AGENT if vm_answers else FailureCause.SANDBOX
 
 
 ## STOPPING ##

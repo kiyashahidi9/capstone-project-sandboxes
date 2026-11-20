@@ -15,6 +15,7 @@ import sys
 
 from openai import OpenAI
 
+from sdk.history import assistant_message, chat_from_events, tool_message
 from sdk.sandbox import Sandbox
 
 
@@ -66,45 +67,17 @@ def load_history(path: str | None) -> list[dict]:
     return json.loads(text)
 
 
-def history_to_messages(events: list[dict]) -> list[dict]:
-    """
-    Turns earlier events back into a chat for the model
-    user_message -> a user turn
-    agent_output and question lines -> joined into one assistant turn
-    """
-    messages: list[dict] = []
-
-    for event in events:
-        text = event["data"].get("text", "")
-
-        if event["type"] == "user_message":
-            messages.append({"role": "user", "content": text})
-
-        elif event["type"] in ("agent_output", "question"):
-            if messages and messages[-1]["role"] == "assistant":
-                messages[-1]["content"] += "\n" + text
-            else:
-                messages.append({"role": "assistant", "content": text})
-
-    return messages
-
-
-## STEPS ##
+## STEPS (docs/agent_contract.md, read by docs/observability.md) ##
 
 def emit(event: dict) -> None:
     """Prints one step as a single JSON line. The runner stores that line as an event."""
-    print(json.dumps(event), flush=True)
+    print(json.dumps(event, default=str), flush=True)
 
 
-def to_jsonable(value):
-    """Turns a model message into plain JSON so the request line can be stored."""
-    if hasattr(value, "model_dump"):
-        return value.model_dump(exclude_none=True)
-    if isinstance(value, dict):
-        return {key: to_jsonable(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [to_jsonable(item) for item in value]
-    return value
+def say(text: str) -> None:
+    """Shows the user one message, as one agent_output event even when it has many lines; skips blank ones."""
+    if text.strip():
+        emit({"type": "agent_output", "text": text})
 
 
 def call_record(call) -> dict:
@@ -117,40 +90,33 @@ def call_record(call) -> dict:
     return {"tool_call_id": call.id, "name": call.function.name, "arguments": arguments}
 
 
-def result_text(result: dict | str) -> str:
-    """The tool message the model reads. An object result is stored as JSON text."""
-    if isinstance(result, str):
-        return result
-    return json.dumps(result)
-
-
 ## TOOL RUNNER ##
 
 def run_tool(sandbox: Sandbox, name: str, args: dict) -> dict | str:
     """
     Runs one tool call from the model in the sandbox
     prints what it's doing
-    returns the result to store and to show the model
+    returns the result to store and to show the model (text as is, anything else as JSON)
     """
     if name == "run_command":
         background = args.get("background", False)
-        print(f"[run] {args['cmd']}" + ("   (background)" if background else ""))
+        say(f"[run] {args['cmd']}" + ("   (background)" if background else ""))
 
         result: dict = sandbox.exec(args["cmd"], cwd=WORKDIR, background=background)
 
+        # the first few lines of output, as one message
         output = result.get("stdout", "") + result.get("stderr", "")
-        for line in output.splitlines()[:5]:
-            print(f"      {line}")
+        say("\n".join(f"      {line}" for line in output.splitlines()[:5]))
 
         return result
 
     path = absolute_path(args["path"])
 
     if name == "read_file":
-        print(f"[read] {path}")
+        say(f"[read] {path}")
         return {"path": path, "content": sandbox.read_file(path)}
 
-    print(f"[write] {path}")
+    say(f"[write] {path}")
     sandbox.write_file(path, args["content"])
     return {"path": path, "content": args["content"]}
 
@@ -166,19 +132,21 @@ def run_turn(task: str, sandbox: Sandbox, client: OpenAI, history: list[dict]) -
     """
     Does one turn: the task, with the earlier events in history
     prints each model call and tool result before the next side effect
+    builds its chat with sdk/history.py, the same code replay uses, so the record matches what the model was sent
     returns the exit code: 0 when finished, 1 when it gave up
     """
-    messages: list = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages += history_to_messages(history)
+    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages += chat_from_events(history)
     messages.append({"role": "user", "content": task})
 
     for _ in range(MAX_STEPS):
+        # record the request before sending it, so a hang or crash in the call shows as unfinished
         emit({
             "type": "llm_request",
             "model": MODEL,
             "system": SYSTEM_PROMPT,
             "tools": TOOLS,
-            "messages": to_jsonable(messages),
+            "messages": messages[1:],
         })
         response = client.chat.completions.create(
             model=MODEL,
@@ -186,18 +154,21 @@ def run_turn(task: str, sandbox: Sandbox, client: OpenAI, history: list[dict]) -
             tools=TOOLS,
         )
         message = response.choices[0].message
-        messages.append(message)
+
+        # record the reply, then add the recorded version to the chat, so the two can't differ
+        reply: dict = {}
+        if message.content or not message.tool_calls:
+            reply["text"] = message.content or ""
+        if message.tool_calls:
+            reply["tool_calls"] = [call_record(call) for call in message.tool_calls]
+        emit({"type": "llm_response", **reply})
+        messages.append(assistant_message(reply))
 
         if not message.tool_calls:
-            text: str = message.content or ""
-            emit({"type": "llm_response", "text": text})
-            print(text)
+            say(message.content or "")      # as output too, so the chat shows the answer
             return EXIT_FINISHED
 
-        records: list[dict] = [call_record(call) for call in message.tool_calls]
-        emit({"type": "llm_response", "tool_calls": records})
-
-        for record in records:
+        for record in reply["tool_calls"]:
             emit({
                 "type": "tool_started",
                 "tool_call_id": record["tool_call_id"],
@@ -217,13 +188,9 @@ def run_turn(task: str, sandbox: Sandbox, client: OpenAI, history: list[dict]) -
                 "tool_call_id": record["tool_call_id"],
                 "result": result,
             })
-            messages.append({
-                "role": "tool",
-                "tool_call_id": record["tool_call_id"],
-                "content": result_text(result),
-            })
+            messages.append(tool_message(record["tool_call_id"], result))
 
-    print(f"stopped after {MAX_STEPS} steps without finishing")
+    say(f"stopped after {MAX_STEPS} steps without finishing")
     return EXIT_FAILED
 
 

@@ -25,7 +25,18 @@ uv run python -m client.client
 
 Type a task at `>`. Sandboxes pause after ~30s idle and resume on your next message. `/quit` destroys the sandbox. To bring your own agent, see [agent_contract.md](sbx/docs/agent_contract.md).
 
-## 3. Run the tests (from `sbx/`, no VM needed)
+## 3. Open the dashboard (from `sbx/dashboard/`)
+
+Needs [Node.js](https://nodejs.org/) 18+, the SSH tunnel from step 2, and `SANDBOX_ADMIN_KEY` in the repo-root `.env`.
+
+```bash
+npm install
+npm run dev      # open http://localhost:5173
+```
+
+See every sandbox and pause, resume or delete it. Click a sandbox ID to see its turns, each turn's **Timeline** (messages, LLM calls, tools, failures) and **Replay** (what the model was sent at each step). Restart `npm run dev` after changing `.env`; the admin key stays in the dev server and never reaches the browser. Details: [observability.md](sbx/docs/observability.md).
+
+## 4. Run the tests (from `sbx/`, no VM needed)
 
 ```bash
 uv run pytest

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -202,3 +203,88 @@ class EventListResponse(BaseModel):
     """The events a client hasn't seen yet, oldest first."""
 
     events: list[Event]
+
+
+# ---------------------------------------------------------------------------
+# Observability: one summary per turn (docs/observability.md)
+# ---------------------------------------------------------------------------
+
+class TurnStatus(StrEnum):
+    """How a turn went, worked out from its events."""
+
+    RUNNING = "running"             # the agent is still working and recently recorded something
+    UNRESPONSIVE = "unresponsive"   # still working, but nothing recorded for a while
+    FINISHED = "finished"           # turn_finished
+    FAILED = "failed"               # turn_failed for any reason but a pause
+    PAUSED = "paused"               # a pause cut the turn off; not a failure
+    INCOMPLETE = "incomplete"       # no end recorded and the agent isn't working; shouldn't happen
+
+
+class FailureCause(StrEnum):
+    """Whose fault a failed turn was."""
+
+    AGENT = "agent"                 # the VM was healthy, so the agent itself crashed or hung
+    SANDBOX = "sandbox"             # the VM or the program inside it stopped answering
+    HOST = "host"                   # our side: server restart, missing AGENT_CMD, runner error
+    PAUSED = "paused"               # a user or auto-pause stopped it
+    UNKNOWN = "unknown"             # the VM check itself failed
+
+
+class TurnSummary(BaseModel):
+    """One turn (one user message and everything done for it), for investigating failures."""
+
+    turn: int                       # 1, 2, 3, ... per sandbox, in message order
+    message: str                    # what the user asked: the turn's user_message text
+    status: TurnStatus
+    reason: str | None = None       # from turn_failed: exit, timeout, paused, server restarted, ...
+    cause: FailureCause | None = None
+    exit_code: int | None = None
+    stderr_tail: str | None = None  # the agent's last 50 lines of stderr, when it failed
+    started_at: int                 # unix seconds, when the user's message arrived
+    ended_at: int | None = None     # unix seconds; None while running
+    first_seq: int                  # the turn's events are first_seq..last_seq
+    last_seq: int
+    seconds_since_last_event: int
+    last_action: Event | None = None      # the last step or output before the turn ended
+    unfinished_step: Event | None = None  # a tool_started or llm_request that never got its answer
+
+
+class TurnListResponse(BaseModel):
+    """Every turn of one sandbox, oldest first."""
+
+    turns: list[TurnSummary]
+
+
+# ---------------------------------------------------------------------------
+# Replay: what the model was sent and what came back, one model call at a time
+# ---------------------------------------------------------------------------
+
+class ReplayTool(BaseModel):
+    """One tool call the model asked for, and what it got back."""
+
+    tool_call_id: str
+    name: str | None = None
+    arguments: Any = None
+    result: Any = None              # exactly what the model was given; None if it never finished
+    finished: bool
+
+
+class ReplayStep(BaseModel):
+    """One model call in a turn, rebuilt from events with sdk/history.py."""
+
+    step: int                       # 1, 2, 3, ... within the turn
+    seq: int                        # the llm_request event's seq
+    at: int                         # unix seconds
+    model: str | None = None
+    messages: list[dict]            # what the model was sent, system prompt first
+    new_messages: int               # how many of them are new since the previous step (or this turn, for step 1)
+    matches_record: bool | None     # the rebuild equals the messages the agent recorded; None if it recorded none
+    response: dict | None = None    # the llm_response's data; None if the model never answered
+    tools: list[ReplayTool]
+
+
+class ReplayResponse(BaseModel):
+    """Every model call of one turn, in order."""
+
+    turn: int
+    steps: list[ReplayStep]

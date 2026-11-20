@@ -71,14 +71,14 @@ class FakeSandbox:
 
 
 def lines(capsys) -> list[dict]:
-    """The JSON steps the agent printed. Plain progress lines are left out."""
+    """The JSON steps the agent printed. Progress lines (plain text, or agent_output lines) are left out."""
     steps: list[dict] = []
     for line in capsys.readouterr().out.splitlines():
         try:
             parsed = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(parsed, dict) and "type" in parsed:
+        if isinstance(parsed, dict) and "type" in parsed and parsed["type"] != "agent_output":
             steps.append(parsed)
     return steps
 
