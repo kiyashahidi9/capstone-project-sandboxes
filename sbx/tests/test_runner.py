@@ -277,6 +277,23 @@ def test_the_agent_gets_the_message_environment_and_earlier_events(tmp_path, mon
     ]
 
 
+SHOWS_KEYS = """
+import os
+print(os.environ["OPENAI_API_KEY"] == os.environ["SANDBOX_TOKEN"])
+print(os.environ["OPENAI_BASE_URL"])
+"""
+
+
+def test_the_agent_gets_its_turn_token_in_place_of_the_real_key(tmp_path, monkeypatch):
+    use_agent(tmp_path, monkeypatch, SHOWS_KEYS)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-real-key-on-the-host")
+    send()
+    runner.run_turn(SANDBOX_ID)
+
+    printed = [data["text"] for kind, data in events() if kind == EventType.AGENT_OUTPUT]
+    assert printed == ["True", "http://127.0.0.1:8000/llm/openai/v1"]
+
+
 def test_missing_agent_cmd_fails_the_turn(monkeypatch):
     monkeypatch.delenv("AGENT_CMD", raising=False)
     send()

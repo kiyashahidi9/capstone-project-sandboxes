@@ -17,6 +17,7 @@ import tempfile
 import threading
 from dataclasses import dataclass, field
 
+import llm_providers
 import locks
 from api import auth, db
 from api.models import EventType, SandboxState, TurnState
@@ -27,7 +28,7 @@ from api.models import EventType, SandboxState, TurnState
 DEFAULT_TURN_TIMEOUT = 1800       # seconds; override with AGENT_TURN_TIMEOUT in .env
 STDERR_LINES_KEPT = 50            # how much of stderr a failed turn saves
 AGENT_SANDBOX_API = "http://127.0.0.1:8000"   # where the agent reaches the API, given as SANDBOX_API
-AI_KEY_NAMES = ("OPENAI_API_KEY",)            # the only secrets from .env the agent gets
+# the agent gets no secrets: provider keys stay in its root-only secrets.env and the API's key proxy adds them
 
 # locked down (2f): the agent runs through systemd-run as this user, with these limits
 AGENT_USER = "sbx-agent"
@@ -173,9 +174,9 @@ def write_history(history: list[dict]) -> str:
 def agent_environment(sandbox_id: str, history_path: str, token: str) -> dict[str, str]:
     """
     The environment from the agent contract
-    only the AI key from .env, so the agent never sees the admin key or anything else
+    nothing from .env and no provider key: each provider's SDK is pointed at the key proxy, with the turn token as its key
     """
-    environment = {name: os.environ[name] for name in AI_KEY_NAMES if name in os.environ}
+    environment = llm_providers.agent_environment(AGENT_SANDBOX_API, token)
 
     if not locked_down():
         environment.update({name: os.environ[name] for name in PASSED_WITHOUT_LOCKDOWN if name in os.environ})

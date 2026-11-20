@@ -45,7 +45,7 @@ openssl version         # comes with macOS and Linux
 
 You also need:
 - A Google account with a **billing account** you're allowed to use.
-- An **OpenAI API key**. It's stored only on the VM, never on your laptop.
+- An **OpenAI API key** for the example agent. It's stored only on the VM, in a root-only `secrets.env` the agent itself can't read.
 
 **On a Mac**, run this first in every laptop terminal you open, or zsh passes the `# …` notes after commands to the commands, and they fail:
 
@@ -102,11 +102,11 @@ export VM=sbx-node-1 ZONE=us-east1-b
 VM_NAME=$VM ZONE=$ZONE sbx/scripts/install.sh
 ```
 
-It asks once for your OpenAI key (typing is hidden), then takes about 15–20 minutes.
+It asks once for the example agent's OpenAI key (typing is hidden) at step 13, then finishes. It takes about 15–20 minutes.
 
 Later parts reuse `$PROJECT`, `$VM` and `$ZONE`. In a new laptop terminal, set them again first: `PROJECT=<your project id> VM=sbx-node-1 ZONE=us-east1-b`.
 
-- [ ] Steps `==> install 1.` to `==> install 13.` run without `error:`. Step 11 says `none, using the example agent`. The setup scripts' checklists in between show every line `[x]`.
+- [ ] Steps `==> install 1.` to `==> install 14.` run without `error:`. Step 11 says `none, using the example agent`. The setup scripts' checklists in between show every line `[x]`.
 - [ ] It ends with `Done.` and prints `export SANDBOX_ADMIN_KEY=...`. **Copy that line somewhere safe.** It's shown only this once.
 
 If it stops with an `error:`, the message says what to do (for example, an organization policy blocking nested virtualization). Note it and stop.
@@ -117,7 +117,7 @@ If it stops with an `error:`, the message says what to do (for example, an organ
 VM_NAME=$VM ZONE=$ZONE sbx/scripts/install.sh
 ```
 
-- [ ] The steps that create something say `already exists`, including `.env (keeping its admin key)`. It doesn't ask for the OpenAI key.
+- [ ] The steps that create something say `already exists`, including `.env (keeping its admin key)` and `the example agent's secrets.env`. It doesn't ask for the OpenAI key.
 - [ ] It says `nothing changed, so the running API was left alone`, and shows **no** new key.
 
 ---
@@ -140,7 +140,7 @@ printf 'SANDBOX_ADMIN_KEY=%s\nSANDBOX_API=http://localhost:8000\n' "$SANDBOX_ADM
 cat .env                                  # two lines: the key, and SANDBOX_API
 ```
 
-The laptop has no OpenAI key. The agent runs on the VM, which has its own copy.
+The laptop has no OpenAI key. The agent runs on the VM, and even it never holds the key: its model calls go through the API's key proxy, which adds the key from `secrets.env`.
 
 **Laptop:** check the connection.
 

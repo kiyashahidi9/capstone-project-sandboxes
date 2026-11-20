@@ -25,7 +25,7 @@ printf 'SANDBOX_ADMIN_KEY=%s\nSANDBOX_API=http://localhost:8000\n' "<the admin k
 cd sbx && uv sync
 ```
 
-The laptop needs the admin key but no OpenAI key.
+The laptop needs the admin key but no OpenAI key. The VM keeps it in a root-only `secrets.env`, and the API's key proxy adds it to the agent's model calls.
 
 **VM-1:**
 

@@ -1,7 +1,7 @@
 """
 A fake agent that tries to break out of the 2f lockdown; every attempt must fail
 installed to /opt/agents by scripts/setup_agents.sh and run by scripts/check_guardrails.sh
-stdin: "<another sandbox's id> <path to the host's .env>"
+stdin: "<another sandbox's id> <path to the host's .env> <path to the agent's secrets.env>"
 prints PASS or FAIL per check; exits 0 only if all pass
 standard library only, so it runs on any Python
 """
@@ -61,7 +61,7 @@ def can_read(path: str) -> bool:
 ## CHECKS ##
 
 def main() -> int:
-    other_id, env_path = sys.stdin.read().split()
+    other_id, env_path, secrets_path = sys.stdin.read().split()
     run_true = b'{"cmd": "true"}'
 
     checks = [
@@ -71,6 +71,9 @@ def main() -> int:
         ("call the API with no key -> 401", call("GET", "/sandboxes", token=None) == 401),
         ("the metadata server is blocked", not reaches_metadata_server()),
         ("cat the .env file -> permission denied", not can_read(env_path)),
+        ("cat secrets.env -> permission denied", not can_read(secrets_path)),
+        ("its OPENAI_API_KEY is only its turn token", os.environ.get("OPENAI_API_KEY") == TOKEN),
+        ("the key proxy refuses a non-model call -> 403", call("POST", "/llm/openai/v1/files", body=b"{}") == 403),
         ("whoami prints sbx-agent", pwd.getpwuid(os.getuid()).pw_name == "sbx-agent"),
     ]
 

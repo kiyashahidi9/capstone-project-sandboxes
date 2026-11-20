@@ -13,7 +13,7 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 import host_manager
-from api import db
+from api import db, llm_proxy
 from api.auth import require_admin, require_admin_key_set, require_admin_or_turn
 from api.helpers import (
     HTTP_ACCEPTED,
@@ -55,6 +55,7 @@ from api.models import (
 )
 from control.live import SampleMemory
 from control.heartbeat import run_until_stopped
+from llm_providers import PROXY_PREFIX
 from runner import runner
 
 
@@ -199,6 +200,20 @@ async def write_file(sandbox_id: str, path: str, request: Request) -> dict[str, 
     content = text_from_body(await request.body())
     await run_in_threadpool(store_file, sandbox_id, path, content)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: the key proxy (api/llm_proxy.py)
+# ---------------------------------------------------------------------------
+
+@app.post(PROXY_PREFIX + "/{provider_name}/{path:path}")
+async def proxy_model_call(provider_name: str, path: str, request: Request) -> StreamingResponse:
+    """Passes an agent's model call on to its provider with the client's key, which the agent never sees."""
+    provider = llm_proxy.require_provider(provider_name)
+    llm_proxy.require_allowed_path(provider, path)
+    llm_proxy.require_turn(request)
+    key = llm_proxy.require_key(provider)
+    return await llm_proxy.forward(request, provider, path, key)
 
 
 # ---------------------------------------------------------------------------

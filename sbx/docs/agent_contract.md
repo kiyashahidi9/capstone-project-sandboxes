@@ -19,7 +19,32 @@ How to hand us your agent. Your agent is a **command**. We run it once for each 
 | `SANDBOX_API` | `http://127.0.0.1:8000` |
 | `SANDBOX_TOKEN` | A token that only works for exec and files on this sandbox, and only during this turn. Anything else gets 403 |
 | `SANDBOX_HISTORY` | Path to a JSON file of earlier events (below) |
-| `OPENAI_API_KEY` | The AI key from the host's `.env` |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | Your turn token, **not** a real key (see Your keys) |
+| `OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL` | The key proxy: `http://127.0.0.1:8000/llm/openai/v1` and `http://127.0.0.1:8000/llm/anthropic` |
+
+## Your keys
+
+Your agent never holds a provider key. Model calls go through the API's **key proxy**, which adds your real key on the way out. So a prompt-injected or buggy agent can't print, send or write your key into the sandbox: the most it has is a turn token that only works from this host, only for model calls, and only until the turn ends.
+
+1. **Put your keys in `secrets.env` at the top of your agent folder**, one per line:
+   ```
+   OPENAI_API_KEY=sk-...
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+   Only the providers you use. `install.sh --agent` copies it to the VM as a root-only file; your agent can't read it.
+2. **Use the official SDK with no key or address in your code.** `OpenAI()` and `Anthropic()` read the two variables above, so they already talk to the proxy with the turn token. If you build the client yourself, pass `base_url` and `api_key` from those variables.
+3. **Keep keys out of everywhere else:** not in `--cmd`, not in other files in the folder, and not in a `.env` (files named `.env*` aren't uploaded). Add `secrets.env` to your `.gitignore`.
+4. **Use a key made for this project, with a spend limit** set at your provider.
+5. **To replace a key**, edit `secrets.env` and run `sbx/scripts/install.sh --update-secrets ~/my-bot`. Nothing restarts; the next model call uses it. For the example agent, run `install.sh --update-secrets` with no folder and it asks for the OpenAI key again.
+
+What the proxy lets through:
+
+| Provider | Model calls allowed | Your key goes in |
+|---|---|---|
+| OpenAI | `v1/chat/completions`, `v1/responses`, `v1/completions`, `v1/embeddings` | `Authorization: Bearer` |
+| Anthropic | `v1/messages`, `v1/messages/count_tokens` | `x-api-key` |
+
+Anything else (files, models, account calls) gets 403. A missing key gets 401 saying which key to add to `secrets.env`. Your provider's own errors, such as a rejected key or no credit left, reach your agent unchanged, so print them to stderr before you exit and they show up in the failed turn. Other providers aren't supported yet; each one is an entry in `llm_providers.py`.
 
 ## History
 

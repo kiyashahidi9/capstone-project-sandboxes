@@ -38,8 +38,10 @@ trap destroy EXIT
 
 ## ONE TURN ##
 
-# the agent's message: the sandbox to attack and the file to try to read
-BODY=$("$PYTHON" -c 'import json, sys; print(json.dumps({"text": sys.argv[1] + " " + sys.argv[2]}))' "$OTHER" "$ENV_FILE")
+# the agent's message: the sandbox to attack and the two files to try to read
+AGENT_DIR=$(grep -E '^AGENT_DIR=' "$ENV_FILE" | cut -d= -f2-)
+SECRETS=${AGENT_DIR:-/opt/agents}/secrets.env
+BODY=$("$PYTHON" -c 'import json, sys; print(json.dumps({"text": " ".join(sys.argv[1:])}))' "$OTHER" "$ENV_FILE" "$SECRETS")
 api -o /dev/null -X POST -H "Content-Type: application/json" -d "$BODY" "$API/sandboxes/$OWN/messages"
 
 # show what the agent prints until the turn ends

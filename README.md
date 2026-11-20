@@ -12,7 +12,7 @@ gcloud config set project <your-project-id>   # billing must be on
 sbx/scripts/install.sh                        # or: --agent ~/my-bot --cmd "python -m mybot"
 ```
 
-It asks for your OpenAI key and takes ~15–20 min. **Save the `SANDBOX_ADMIN_KEY` it prints** — it's shown once. Safe to rerun.
+It asks for the example agent's OpenAI key and takes ~15–20 min. The key lands in a root-only `secrets.env` on the VM; the agent never sees it, because its model calls go through the API's key proxy. Your own agent can use OpenAI or Anthropic: put its keys in `secrets.env` in its folder ([agent_contract.md](sbx/docs/agent_contract.md#your-keys)), and replace them later with `install.sh --update-secrets`. **Save the `SANDBOX_ADMIN_KEY` it prints** — it's shown once. Safe to rerun.
 
 ## 2. Connect and chat (from `sbx/`)
 

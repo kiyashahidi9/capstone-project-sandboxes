@@ -4,6 +4,10 @@
 # Runs on YOUR computer, unlike the other scripts here, which run on the host.
 # Log in and pick your project first, then:   sbx/scripts/install.sh
 # To install your own agent instead of the example:   sbx/scripts/install.sh --agent ~/my-bot [--cmd "python -m mybot"]
+#   Put its provider keys in ~/my-bot/secrets.env (docs/agent_contract.md); the agent itself never reads them.
+# To replace keys later, without reinstalling or restarting anything:
+#   sbx/scripts/install.sh --update-secrets ~/my-bot   (your agent: copies its secrets.env again)
+#   sbx/scripts/install.sh --update-secrets            (the example agent: asks for its OpenAI key again)
 # Safe to rerun: every step skips what already exists.
 #
 # The VM gets the commit your copy of the repo is on, so push it first; uncommitted changes aren't installed.
@@ -19,11 +23,12 @@
 #   7. SSH in as sbx
 #   8. The repo at your commit, in /home/sbx/capstone-project-sandboxes
 #   9. setup_host.sh
-#  10. .env with a new admin key and your OpenAI key (first install only)
+#  10. .env with a new admin key (first install only)
 #  11. Your agent's folder, with --agent
 #  12. setup_agents.sh
-#  13. The API as a service (scripts/sbx-api.service), restarted only if code, .env or agent changed
-#  14. How to connect
+#  13. Agent keys: the example agent's OpenAI key (asked once), or a check that your agent has secrets.env
+#  14. The API as a service (scripts/sbx-api.service), restarted only if code, .env or agent changed
+#  15. How to connect
 #
 # Settings (environment variables):
 #   ZONE      default us-east1-b
@@ -42,6 +47,8 @@ REPO_URL=https://github.com/kiyashahidi9/capstone-project-sandboxes.git
 LOCAL_REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 REMOTE_REPO=/home/$VM_USER/capstone-project-sandboxes
 AGENT_UPLOAD=/home/$VM_USER/agent-upload
+AGENTS_DIR=/opt/agents            # where setup_agents.sh installs agents on the VM
+SECRETS_FILE=secrets.env          # an agent's provider keys; root only on the VM, read only by the API's key proxy
 SSH_TRIES=24                      # a new VM takes up to about two minutes to accept SSH
 SSH_WAIT_SECONDS=5
 ADMIN_KEY=""                      # set only when this run makes a new .env
@@ -53,18 +60,24 @@ die()  { echo "error: $*" >&2; exit 1; }
 log()  { echo "==> install $*"; }   # "install": the setup scripts it runs on the VM print their own numbered steps
 skip() { echo "    $* already exists"; }
 
-# Reads --agent and --cmd from the command line.
+USAGE='usage: install.sh [--agent <folder> [--cmd "<command>"]]   or   install.sh --update-secrets [<folder>]'
+
+# Reads --agent, --cmd and --update-secrets from the command line.
 parse_args() {
-  AGENT_PATH="" AGENT_RUN=""
+  AGENT_PATH="" AGENT_RUN="" UPDATE_SECRETS="" SECRETS_FROM=""
   while (( $# )); do
     case $1 in
       --agent) AGENT_PATH=${2:?--agent needs a folder}; shift 2 ;;
       --cmd)   AGENT_RUN=${2:?--cmd needs a command}; shift 2 ;;
-      *)       die "usage: install.sh [--agent <folder> [--cmd \"<command>\"]]" ;;
+      --update-secrets)
+        UPDATE_SECRETS=yes; shift
+        if (( $# )) && [[ $1 != --* ]]; then SECRETS_FROM=$1; shift; fi ;;
+      *) die "$USAGE" ;;
     esac
   done
   [[ -z $AGENT_RUN || -n $AGENT_PATH ]] || die "--cmd only works together with --agent"
   [[ -z $AGENT_PATH || -d $AGENT_PATH ]] || die "--agent $AGENT_PATH is not a folder"
+  [[ -z $UPDATE_SECRETS || -z $AGENT_PATH ]] || die "--update-secrets replaces keys only; use it without --agent"
 }
 
 # Stops unless the Google Cloud CLI is installed and logged in.
@@ -196,22 +209,22 @@ env_exists() {
   vm_ssh "sudo test -f $REMOTE_REPO/.env"
 }
 
-# Asks for the OpenAI key and writes a new .env with a fresh admin key; secrets go over SSH input, never a command line.
+# Writes a new .env with a fresh admin key; secrets go over SSH input, never a command line.
 write_env() {
-  local openai_key
-  read -rsp "OpenAI API key (typing is hidden): " openai_key
-  echo
-  [[ -n $openai_key ]] || die "an OpenAI key is required"
   ADMIN_KEY=$(openssl rand -hex 32)
-  env_contents "$openai_key" | vm_ssh "sudo tee $REMOTE_REPO/.env >/dev/null && sudo chmod 600 $REMOTE_REPO/.env"
+  env_contents | vm_write_root_only "$REMOTE_REPO/.env"
 }
 
-# Gives the text of a new .env for this host.
+# Saves what arrives on stdin as a file on the VM that only root can read, with no moment it's readable by others.
+vm_write_root_only() {
+  vm_ssh "sudo bash -c 'umask 077 && cat > $1'"
+}
+
+# Gives the text of a new .env for this host; provider keys don't go here, they go in the agent's secrets.env.
 env_contents() {
   cat <<EOF
 SANDBOX_ADMIN_KEY=$ADMIN_KEY
-OPENAI_API_KEY=$1
-AGENT_CMD=/opt/agents/.venv/bin/python /opt/agents/agent.py
+AGENT_CMD=$AGENTS_DIR/.venv/bin/python $AGENTS_DIR/agent.py
 AGENT_DIR=
 SNAPSHOT_BUCKET=gs://$BUCKET
 DELETE_PAUSED_AFTER_DAYS=
@@ -236,6 +249,57 @@ run_setup_agents() {
     [[ -z $AGENT_RUN ]] || settings+=" AGENT_RUN=$(printf %q "$AGENT_RUN")"
   fi
   vm_ssh "cd $REMOTE_REPO/sbx && sudo $settings bash scripts/setup_agents.sh"
+}
+
+# Deletes the uploaded copy of the client's agent, so the only copy of its secrets.env on the VM is the root-only one.
+remove_agent_upload() {
+  vm_ssh "rm -rf $AGENT_UPLOAD"
+}
+
+# ---------------------------------------------------------------------------
+# Agent keys: each agent's secrets.env, which only the API's key proxy reads
+# ---------------------------------------------------------------------------
+
+# Gives the folder on the VM an agent is installed in: the client's folder by name, or the example agent's.
+vm_agent_dir() {
+  if [[ -n $1 ]]; then echo "$AGENTS_DIR/$(basename "$1")"; else echo "$AGENTS_DIR"; fi
+}
+
+# Checks whether the example agent already has its secrets.env on the VM.
+example_key_exists() {
+  vm_ssh "sudo test -f $AGENTS_DIR/$SECRETS_FILE"
+}
+
+# Asks for the example agent's OpenAI key and saves it as its root-only secrets.env on the VM.
+ask_example_key() {
+  local openai_key
+  read -rsp "OpenAI API key for the example agent (typing is hidden): " openai_key
+  echo
+  [[ -n $openai_key ]] || die "the example agent needs an OpenAI key; to use another provider, install your own agent with --agent"
+  printf 'OPENAI_API_KEY=%s\n' "$openai_key" | vm_write_root_only "$AGENTS_DIR/$SECRETS_FILE"
+}
+
+# Warns when the client's agent folder has no secrets.env, since its model calls are refused without one.
+warn_if_no_secrets() {
+  [[ -f $AGENT_PATH/$SECRETS_FILE ]] && return
+  echo "    warning: $AGENT_PATH has no $SECRETS_FILE, so its model calls will be refused."
+  echo "    Add one (docs/agent_contract.md), then run: install.sh --update-secrets $AGENT_PATH"
+}
+
+# Copies secrets.env from the client's agent folder to that agent's folder on the VM, root only.
+send_secrets() {
+  local folder=$1 target
+  target=$(vm_agent_dir "$folder")
+  [[ -f $folder/$SECRETS_FILE ]] || die "$folder has no $SECRETS_FILE"
+  vm_ssh "sudo test -d $target" || die "$(basename "$folder") isn't installed on $VM_NAME yet: run install.sh --agent $folder first"
+  vm_write_root_only "$target/$SECRETS_FILE" < "$folder/$SECRETS_FILE"
+}
+
+# Replaces an agent's keys on the VM without reinstalling or restarting anything.
+update_secrets() {
+  require_gcloud
+  if [[ -n $SECRETS_FROM ]]; then send_secrets "$SECRETS_FROM"; else ask_example_key; fi
+  echo "Keys updated. The next model call uses them; nothing was restarted."
 }
 
 # Gives the commit the VM's repo is on, or nothing before the first install.
@@ -300,6 +364,7 @@ print_admin_key() {
 # Sets up the host in your Google Cloud project, one step at a time.
 main() {
   parse_args "$@"
+  if [[ -n $UPDATE_SECRETS ]]; then update_secrets; return; fi
 
   log "1. preflight"
   require_gcloud
@@ -349,8 +414,18 @@ main() {
 
   log "12. agent lockdown"
   run_setup_agents
+  if [[ -n $AGENT_PATH ]]; then remove_agent_upload; fi
 
-  log "13. API service $SERVICE"
+  log "13. agent keys"
+  if [[ -n $AGENT_PATH ]]; then
+    warn_if_no_secrets
+  elif example_key_exists; then
+    skip "the example agent's $SECRETS_FILE"
+  else
+    ask_example_key
+  fi
+
+  log "14. API service $SERVICE"
   install_service
   if needs_restart; then restart_api; else echo "    nothing changed, so the running API was left alone"; fi
   wait_for_api
